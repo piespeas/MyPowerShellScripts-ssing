@@ -40,8 +40,8 @@ foreach ($file in $allFiles) {
         $pattern = "Setting user:\s*(\S+)"
         if ($content -and $content -match $pattern) {
             $results += [PSCustomObject]@{
-                "Usernames" = $Matches[1]
-                "Path" = $file.FullName
+                "Username" = $Matches[1]
+                "Path"     = $file.FullName
             }
         }
     }
@@ -52,11 +52,45 @@ foreach ($file in $allFiles) {
 
 if ($results.Count -gt 0) {
     $seenUsernames = @{}
+    $unique = @()
+
     $results | ForEach-Object {
-        if (-not $seenUsernames.ContainsKey($_.Usernames)) {
-            $seenUsernames[$_.Usernames] = $true
-            Write-Host ("{0,-20}" -f $_.Usernames) -ForegroundColor Cyan -NoNewline
-            Write-Host $_.Path -ForegroundColor White
+        if (-not $seenUsernames.ContainsKey($_.Username)) {
+            $seenUsernames[$_.Username] = $true
+            $unique += $_
         }
     }
+
+    $termWidth   = $Host.UI.RawUI.WindowSize.Width
+    $userColW    = 25
+    $pathColW    = $termWidth - $userColW - 7
+    $divider     = ("=" * ($userColW + $pathColW + 7))
+    $rowDivider  = ("-" * ($userColW + $pathColW + 7))
+
+    Write-Host ""
+    Write-Host $divider -ForegroundColor DarkGray
+    Write-Host ("| {0,-$userColW} | {1,-$pathColW} |" -f "USERNAME", "PATH") -ForegroundColor White
+    Write-Host $divider -ForegroundColor DarkGray
+
+    foreach ($entry in $unique) {
+        $username = $entry.Username
+        $path     = $entry.Path
+
+        # Truncate path if too long
+        if ($path.Length -gt $pathColW) {
+            $path = "..." + $path.Substring($path.Length - ($pathColW - 3))
+        }
+
+        Write-Host ("| " ) -ForegroundColor DarkGray -NoNewline
+        Write-Host ("{0,-$userColW}" -f $username) -ForegroundColor Cyan -NoNewline
+        Write-Host (" | ") -ForegroundColor DarkGray -NoNewline
+        Write-Host ("{0,-$pathColW}" -f $path) -ForegroundColor White -NoNewline
+        Write-Host (" |") -ForegroundColor DarkGray
+
+        Write-Host $rowDivider -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    Write-Host ("  Total unique usernames found: {0}" -f $unique.Count) -ForegroundColor Yellow
+    Write-Host ""
 }
