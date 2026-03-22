@@ -1,20 +1,14 @@
-$Accent      = "Magenta"
-$AccentDark  = "DarkMagenta"
-$Secondary   = "DarkGray"
-$Primary     = "White"
-$ErrorCol    = "Red"
-
 Write-Host @"
 meow
-"@ -ForegroundColor $Accent
+"@ -ForegroundColor Green
 
-Write-Host "                          By AcousticVoid :3" -ForegroundColor $Secondary
+Write-Host "                          By AcousticVoid :3" -ForegroundColor Yellow
 Write-Host ""
 
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "This script requires Administrator privileges." -ForegroundColor $AccentDark
-    Write-Host "Restarting as Administrator" -ForegroundColor $AccentDark
+    Write-Host "This script requires Administrator privileges." -ForegroundColor DarkYellow
+    Write-Host "Restarting as Administrator" -ForegroundColor DarkYellow
     
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "PowerShell"
@@ -26,7 +20,7 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
         exit
     }
     catch {
-        Write-Host "no admin" -ForegroundColor $ErrorCol
+        Write-Host "no admin" -ForegroundColor DarkRed
     }
 }
 
@@ -35,24 +29,29 @@ if (!(Test-Path $DownloadPath)) {
     New-Item -ItemType Directory -Path $DownloadPath -Force | Out-Null
 }
 
+
 function Add-DefenderExclusion {
-    Write-Host "`nSetting up antivirus exclusion" -ForegroundColor $Accent
-    Write-Host "Adding Windows Defender exclusion for $DownloadPath" -NoNewline -ForegroundColor $Secondary
+    Write-Host "`nSetting up antivirus exclusion" -ForegroundColor Yellow
+    Write-Host "Adding Windows Defender exclusion for $DownloadPath" -NoNewline
     
     $success = $false
     
+
     try {
         if (Get-Command Get-MpPreference -ErrorAction SilentlyContinue) {
             $existingExclusions = (Get-MpPreference -ErrorAction Stop).ExclusionPath
             if ($existingExclusions -notcontains $DownloadPath) {
                 Add-MpPreference -ExclusionPath $DownloadPath -ErrorAction Stop
             }
-            Write-Host " Success" -ForegroundColor $Accent
+            Write-Host " Success" -ForegroundColor Green
             $success = $true
         }
     }
-    catch { }
+    catch {
+      
+    }
     
+  
     if (-not $success) {
         try {
             $regPath = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths"
@@ -61,12 +60,15 @@ function Add-DefenderExclusion {
                 if (-not $existingValue) {
                     New-ItemProperty -Path $regPath -Name $DownloadPath -Value 0 -PropertyType DWORD -Force -ErrorAction Stop | Out-Null
                 }
-                Write-Host " Success" -ForegroundColor $Accent
+                Write-Host " Success" -ForegroundColor Green
                 $success = $true
             }
         }
-        catch { }
+        catch {
+           
+        }
     }
+    
     
     if (-not $success) {
         try {
@@ -74,27 +76,32 @@ function Add-DefenderExclusion {
             if (Get-WmiObject -Namespace $namespace -List -ErrorAction SilentlyContinue) {
                 $defender = Get-WmiObject -Namespace $namespace -Class "MSFT_MpPreference" -ErrorAction Stop
                 $defender.AddExclusionPath($DownloadPath)
-                Write-Host " Success" -ForegroundColor $Accent
+                Write-Host " Success" -ForegroundColor Green
                 $success = $true
             }
         }
-        catch { }
+        catch {
+           
+        }
     }
     
     if (-not $success) {
-        Write-Host " Failed" -ForegroundColor $ErrorCol
+        Write-Host " Failed" -ForegroundColor DarkRed
+        
     }
     
     return $success
 }
 
+
 $exclusionAdded = Add-DefenderExclusion
 
 if (-not $exclusionAdded) {
-    Write-Host "`nCould not add automatic antivirus exclusion, you are prolly using some 3rd party av." -ForegroundColor $AccentDark
-    Write-Host "`nContinuing with downloads (some might be deleted)" -ForegroundColor $Secondary
+    Write-Host "`nCould not add automatic antivirus exclusion, you are prolly using some 3rd party av." -ForegroundColor DarkYellow
+    Write-Host "`nContinuing with downloads (some might be deleted)" -ForegroundColor DarkYellow
     Start-Sleep -Seconds 3
 } else {
+    
 }
 
 function Download-File {
@@ -102,7 +109,7 @@ function Download-File {
     
     try {
         $outputPath = Join-Path $DownloadPath $FileName
-        Write-Host "  Downloading $ToolName" -NoNewline -ForegroundColor $Secondary
+        Write-Host "  Downloading $ToolName" -NoNewline
         $ProgressPreference = 'SilentlyContinue'
         Invoke-WebRequest -Uri $Url -OutFile $outputPath -UserAgent "PowerShell" -UseBasicParsing | Out-Null
         
@@ -111,11 +118,11 @@ function Download-File {
             Expand-Archive -Path $outputPath -DestinationPath $extractPath -Force | Out-Null
             Remove-Item $outputPath -Force | Out-Null
         }
-        Write-Host " Done" -ForegroundColor $Accent
+        Write-Host " Done" -ForegroundColor Green
         return $true
     }
     catch {
-        Write-Host " Failed" -ForegroundColor $ErrorCol
+        Write-Host " Failed" -ForegroundColor DarkRed
         return $false
     }
     finally {
@@ -128,22 +135,72 @@ function Download-Tools {
     
     $successCount = 0
     
-    Write-Host "`nDownloading $CategoryName tools" -ForegroundColor $Accent
+    Write-Host "`nDownloading $CategoryName tools" -ForegroundColor Yellow
     foreach ($tool in $Tools) {
         if (Download-File -Url $tool.Url -FileName $tool.File -ToolName $tool.Name) {
             $successCount++
         }
     }
     
-    Write-Host ($CategoryName + ": " + $successCount + "/" + $Tools.Count + " tools downloaded successfully") -ForegroundColor $Secondary
+    Write-Host ($CategoryName + ": " + $successCount + "/" + $Tools.Count + " tools downloaded successfully") -ForegroundColor Yellow
 }
+
+$spowksucksasscheeks = @(
+    @{ Name="Kernel Live Dump Analyzer Parser"; Url="https://github.com/spokwn/KernelLiveDumpTool/releases/download/v1.1/KernelLiveDumpTool.exe"; File="KernelLiveDumpTool.exe" },
+    @{ Name="BAM Parser"; Url="https://github.com/spokwn/BAM-parser/releases/download/v1.2.9/BAMParser.exe"; File="BAMParser.exe" },
+    @{ Name="Paths Parser"; Url="https://github.com/spokwn/PathsParser/releases/download/v1.2/PathsParser.exe"; File="PathsParser.exe" },
+    @{ Name="JournalTrace"; Url="https://github.com/spokwn/JournalTrace/releases/download/1.2/JournalTrace.exe"; File="JournalTrace.exe" },
+    @{ Name="Tool"; Url="https://github.com/spokwn/Tool/releases/download/v1.1.3/espouken.exe"; File="espouken.exe" },
+    @{ Name="PcaSvc Executed"; Url="https://github.com/spokwn/pcasvc-executed/releases/download/v0.8.7/PcaSvcExecuted.exe"; File="PcaSvcExecuted.exe" },
+    @{ Name="BAM Deleted Keys"; Url="https://github.com/spokwn/BamDeletedKeys/releases/download/v1.0/BamDeletedKeys.exe"; File="BamDeletedKeys.exe" },
+    @{ Name="Prefetch Parser"; Url="https://github.com/spokwn/prefetch-parser/releases/download/v1.5.5/PrefetchParser.exe"; File="PrefetchParser.exe" },
+    @{ Name="Activities Cache Parser"; Url="https://github.com/spokwn/ActivitiesCache-execution/releases/download/v0.6.5/ActivitiesCacheParser.exe"; File="ActivitiesCacheParser.exe" }
+)
+
+$zimmermanTools = @(
+    @{ Name="AmcacheParser"; Url="https://download.ericzimmermanstools.com/net9/AmcacheParser.zip"; File="AmcacheParser.zip" },
+    @{ Name="AppCompatCacheParser"; Url="https://download.ericzimmermanstools.com/net9/AppCompatCacheParser.zip"; File="AppCompatCacheParser.zip" },
+    @{ Name="JumpListExplorer"; Url="https://download.ericzimmermanstools.com/net9/JumpListExplorer.zip"; File="JumpListExplorer.zip" },
+    @{ Name="bstrings"; Url="https://download.ericzimmermanstools.com/net9/bstrings.zip"; File="bstrings.zip" },
+    @{ Name="PECmd"; Url="https://download.ericzimmermanstools.com/net9/PECmd.zip"; File="PECmd.zip" },
+    @{ Name="SrumECmd"; Url="https://download.ericzimmermanstools.com/net9/SrumECmd.zip"; File="SrumECmd.zip" },
+    @{ Name="TimelineExplorer"; Url="https://download.ericzimmermanstools.com/net9/TimelineExplorer.zip"; File="TimelineExplorer.zip" },
+    @{ Name="RegistryExplorer"; Url="https://download.ericzimmermanstools.com/net9/RegistryExplorer.zip"; File="RegistryExplorer.zip" },
+    @{ Name="MFTECmd"; Url="https://download.ericzimmermanstools.com/net9/MFTECmd.zip"; File="MFTECmd.zip" }
+)
+
+$nirsoftTools = @(
+    @{ Name="WinPrefetchView"; Url="https://www.nirsoft.net/utils/winprefetchview-x64.zip"; File="winprefetchview-x64.zip" },
+    @{ Name="USBDeview"; Url="https://www.nirsoft.net/utils/usbdeview-x64.zip"; File="usbdeview-x64.zip" },
+    @{ Name="NetworkUsageView"; Url="https://www.nirsoft.net/utils/networkusageview-x64.zip"; File="networkusageview-x64.zip" },
+    @{ Name="AlternateStreamView"; Url="https://www.nirsoft.net/utils/alternatestreamview-x64.zip"; File="alternatestreamview-x64.zip" },
+    @{ Name="UninstallView"; Url="https://www.nirsoft.net/utils/uninstallview-x64.zip"; File="uninstallview-x64.zip" },
+    @{ Name="PreviousFilesRecovery"; Url="https://www.nirsoft.net/utils/previousfilesrecovery-x64.zip"; File="previousfilesrecovery-x64.zip" }
+)
+
+$lily tools = @(
+    @{ Name="AltDetector"; Url="https://github.com/praiselily/AltDetector/releases/download/Detector/AltDetector.exe"; File="AltDetector.exe" },
+    @{ Name="FakerFinder"; Url="https://github.com/praiselily/WeHateFakers/releases/download/Screenshare/FakerFinder.jar"; File="FakerFinder.jar" },
+    @{ Name="HardlinkFinder"; Url="https://github.com/praiselily/HardlinkFinder/releases/download/Tools/hardlink.exe"; File="hardlink.exe" }
+)
+
+$otherTools = @(
+    @{ Name="System Informer"; Url="https://github.com/winsiderss/si-builds/releases/download/3.2.25297.1516/systeminformer-build-canary-setup.exe"; File="systeminformer-build-canary-setup.exe" },
+    @{ Name="Everything Search"; Url="https://www.voidtools.com/Everything-1.4.1.1029.x86-Setup.exe"; File="Everything-1.4.1.1029.x86-Setup.exe" },
+    @{ Name="FTK Imager"; Url="https://www.mediafire.com/file/qqhbjhop1zgufsa/Exterro_FTK_Imager_%28x64%29-4.7.3.81.exe/file"; File="Exterro_FTK_Imager_x64-4.7.3.81.exe" }
+    @{ Name="InjGen"; Url="https://github.com/NotRequiem/InjGen/releases/download/v2.0/InjGen.exe"; File="InjGen.exe" },
+    @{ Name="PrefetchView++"; Url="https://github.com/Orbdiff/PrefetchView/releases/download/v1.5.4/PrefetchView++.exe"; File="PrefetchView++.exe" },
+    @{ Name="Velociraptor"; Url="https://github.com/Velocidex/velociraptor/releases/download/v0.6.6-1/velociraptor-v0.6.6-3-windows-386.exe"; File="velociraptor-v0.6.6-3-windows-386.exe" },
+    @{ Name="Recaf"; Url="https://github.com/Col-E/Recaf/releases/download/4.0.0-alpha/recaf-4x-alpha-win-86x64.jar"; File="recaf-4x-alpha-win-86x64.jar" },
+    @{ Name="Magnet RESPONSE"; Url="https://download1523.mediafire.com/gk67r6nckolg0pVDmP5hLkBI3VjM7Af0YDg8r64Ud95cg71fsgx30IIZdel2UnxZwffrJGajQqcaacuX92JTv2k9t0QhD0Q4QoMj_6KwY048nunCaPizYhnz2kjBXikuFd3nZcnceD2SJMOUOwJATJ-zBD7RIK-eXpcSI8L1JMUYXA/lxnu4z9sqzz63lc/MRCv120.exe"; File="MRCv120.exe" },
+    @{ Name="Hayabusa"; Url="https://github.com/Yamato-Security/hayabusa/releases/download/v3.6.0/hayabusa-3.6.0-win-x64.zip"; File="hayabusa-3.6.0-win-x64.zip" }
+)
 
 $installAllResponse = Read-Host "`nDo you want to download ALL tool categories? (Y/N)"
 $installAll = $installAllResponse -match '^[Yy]'
 
 if ($installAll) {
-    Write-Host "`nDownloading all tool categories..." -ForegroundColor $Accent
-    
+    Write-Host "`nDownloading all tool categories..." -ForegroundColor Green
     Download-Tools -Tools $spowksucksasscheeks -CategoryName "Spokwn's"
     Download-Tools -Tools $zimmermanTools -CategoryName "Zimmerman's"
     
@@ -156,8 +213,38 @@ if ($installAll) {
     Download-Tools -Tools $myTools -CategoryName "My"
     Download-Tools -Tools $otherTools -CategoryName "Other Common"
 } else {
-    Write-Host "`nSelect which categories to download:" -ForegroundColor $AccentDark
+    Write-Host "`nSelect which categories to download:" -ForegroundColor DarkYellow
+    
+    $response = Read-Host "`nDo you want to download Spokwn's tools? (Y/N)"
+    if ($response -match '^[Yy]') {
+        Download-Tools -Tools $spowksucksasscheeks -CategoryName "Spokwn's"
+    }
+
+    $response = Read-Host "`nDo you want to download Zimmerman's tools? (Y/N)"
+    if ($response -match '^[Yy]') {
+        Download-Tools -Tools $zimmermanTools -CategoryName "Zimmerman's"
+        
+        $runtimeResponse = Read-Host "`nWould you like to install the .NET Runtime (required for zimmerman) (Y/N)"
+        if ($runtimeResponse -match '^[Yy]') {
+            Download-File -Url "https://builds.dotnet.microsoft.com/dotnet/Sdk/9.0.306/dotnet-sdk-9.0.306-win-x64.exe" -FileName "dotnet-sdk-9.0.306-win-x64.exe" -ToolName ".NET Runtime"
+        }
+    }
+
+    $response = Read-Host "`nDo you want to download Nirsoft tools? (Y/N)"
+    if ($response -match '^[Yy]') {
+        Download-Tools -Tools $nirsoftTools -CategoryName "Nirsoft"
+    }
+
+    $response = Read-Host "`nDo you want to download My tools? (Y/N)"
+    if ($response -match '^[Yy]') {
+        Download-Tools -Tools $myTools -CategoryName "My"
+    }
+
+    $response = Read-Host "`nDo you want to download other common tools? (Y/N)"
+    if ($response -match '^[Yy]') {
+        Download-Tools -Tools $otherTools -CategoryName "Other Common"
+    }
 }
 
-Write-Host "`nFor questions etc dm piespeas on discord" -ForegroundColor $Secondary
-Write-Host "all is in: $DownloadPath" -ForegroundColor $Secondary
+Write-Host "`nFor questions etc dm piespeas on discord" -ForegroundColor Yellow
+Write-Host "all is in: $DownloadPath" -ForegroundColor Yellow
