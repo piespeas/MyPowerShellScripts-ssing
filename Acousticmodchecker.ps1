@@ -739,3 +739,8 @@ Write-Host ("━" * 76) -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Press any key to exit..." -ForegroundColor DarkGray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+Write-Host "" 
+Write-Host "AcousticVoid owns all cheaters" -ForegroundColor Magenta 
+Write-Host "AcousticVoid is the daddy of all cheaters" -ForegroundColor Magenta
+Write-Host "AcousticVoid is the king of all cheaters" -ForegroundColor Magenta
+Write-Host "AcousticVoid is the god of all cheaters" -ForegroundColor Mag
