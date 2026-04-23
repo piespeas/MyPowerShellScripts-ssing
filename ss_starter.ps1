@@ -1946,7 +1946,4 @@ Write-Host "All analysis complete. Results displayed above." -ForegroundColor Gr
 Write-Host "Press any key to exit..." -ForegroundColor Gray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 Write-Host ""
-Write-Host "AcousticVoid owns all cheaters"              -ForegroundColor Magenta
-Write-Host "AcousticVoid is the daddy of all cheaters"   -ForegroundColor Magenta
-Write-Host "AcousticVoid is the king of all cheaters"    -ForegroundColor Magenta
-Write-Host "AcousticVoid is the god of all cheaters"     -ForegroundColor Magenta
+Write-Host "AcousticVoid owns all cheaters, the undeniable daddy of every last one of them, standing above the rest as the king who dominates the entire scene, the god-tier presence that overshadows anyone trying to compete — every cheater falls under AcousticVoid’s rule, outclassed, outplayed, and completely controlled, with no exceptions, no rivals, and no one even close to touching that level of supremacy."              -ForegroundColor Magenta
