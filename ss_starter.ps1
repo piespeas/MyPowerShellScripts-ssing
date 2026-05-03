@@ -1947,3 +1947,41 @@ Write-Host "Press any key to exit..." -ForegroundColor Gray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 Write-Host ""
 Write-Host "AcousticVoid owns all cheaters, the undeniable daddy of every last one of them, standing above the rest as the king who dominates the entire scene, the god-tier presence that overshadows anyone trying to compete — every cheater falls under AcousticVoid’s rule, outclassed, outplayed, and completely controlled, with no exceptions, no rivals, and no one even close to touching that level of supremacy."              -ForegroundColor Magenta
+
+
+# ============================================================
+#  TRANSITION TO PART 3
+# ============================================================
+Write-Host ""
+Write-Host ("=" * 76) -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Press any key to continue to the JVM Checker..." -ForegroundColor Gray
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+
+# ============================================================
+#  PART 3 - JVM CHECKER
+# ============================================================
+Write-Host "`nJVM CHECKER" -ForegroundColor Cyan
+
+Get-CimInstance Win32_Process | Where-Object { $_.Name -in @("javaw.exe", "java.exe") } | ForEach-Object {
+    $cmd = $_.CommandLine
+
+    if (-not $cmd) { return }
+
+    $argList = $cmd -split ' (?=-)'
+
+    $filteredArgs = $argList | Where-Object {
+        $_ -like "-Xmx*" -or 
+        $_ -like "-Xms*" -or 
+        $_ -like "-javaagent*" -or 
+        $_ -like "-Dfabric.addMods*" -or 
+        $_ -like "-Dloader.addMods*"
+    }
+
+    if ($filteredArgs) {
+        Write-Host "`n[Process ID: $($_.ProcessId)] --- Minecraft JVM / Mod Arguments ---" -ForegroundColor Cyan
+        $filteredArgs | ForEach-Object { Write-Host $_.Trim() }
+    } else {
+        Write-Host "No specific JVM/Mod arguments found for process: $($_.ProcessId)" -ForegroundColor Yellow
+    }
+}
