@@ -454,7 +454,7 @@ try {
             $allEventIDs = $eventDefinitions | ForEach-Object { $_.ID }
             $idString = $allEventIDs -join " or EventID="
             
-            $events = Get-WinEvent -LogName $logName -FilterXPath "*[System[EventID=$idString] and TimeCreated[@SystemTime>='$($startTime.ToUniversalTime():yyyy-MM-ddTHH:mm:ss.fffZ')']" -ErrorAction SilentlyContinue
+            $events = Get-WinEvent -LogName $logName -FilterXPath "*[System[EventID=$idString] and TimeCreated[@SystemTime>='$($startTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')')']" -ErrorAction SilentlyContinue
             
             if ($events) {
                 foreach ($event in $events) {
