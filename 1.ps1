@@ -144,6 +144,128 @@ foreach ($s in $regSettings) {
     }
 }
 
+# -- USB history -----------------------------------------------
+Write-Host "`nUSB HISTORY" -ForegroundColor Magenta
+try {
+    $usbRegPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\USBSTOR"
+    if (Test-Path $usbRegPath) {
+        $usbDevices = Get-ChildItem -Path $usbRegPath -ErrorAction SilentlyContinue
+        if ($usbDevices) {
+            foreach ($device in $usbDevices) {
+                $instances = Get-ChildItem -Path $device.PSPath -ErrorAction SilentlyContinue
+                foreach ($instance in $instances) {
+                    $props        = Get-ItemProperty -Path $instance.PSPath -ErrorAction SilentlyContinue
+                    $friendlyName = $props.FriendlyName
+                    if (-not $friendlyName) { $friendlyName = $device.PSChildName -replace "_", " " }
+
+                    # last plug-in time from the Properties subkey
+                    $lastArrival = $null
+                    $propKey = Join-Path $instance.PSPath "Properties\{83da6326-97a6-4088-9453-a1923f573b29}\0065"
+                    if (Test-Path $propKey) {
+                        $raw = Get-ItemProperty -Path $propKey -ErrorAction SilentlyContinue
+                        if ($raw.'(default)') {
+                            try { $lastArrival = [datetime]::FromFileTime([BitConverter]::ToInt64($raw.'(default)', 0)) } catch {}
+                        }
+                    }
+
+                    Write-Host "  * " -NoNewline -ForegroundColor Magenta
+                    Write-Host $friendlyName -ForegroundColor White -NoNewline
+                    if ($lastArrival) {
+                        Write-Host (" | Last seen: {0}" -f $lastArrival.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Yellow
+                    } else {
+                        Write-Host ""
+                    }
+                    
+                    # Add time stamps for USB devices
+                    $deviceProps = Get-WmiObject -Class Win32_USBControllerDevice -Filter "DeviceID='$($device.DeviceID)'" -ErrorAction SilentlyContinue
+                    if ($deviceProps) {
+                        Write-Host "    | Connected: $($deviceProps.Connected)" -ForegroundColor Gray
+                        Write-Host "    | Driver Date: $($deviceProps.DriverDate)" -ForegroundColor Gray
+                        Write-Host "    | Driver Version: $($deviceProps.DriverVersion)" -ForegroundColor Gray
+                    }
+                }
+            }
+        } else {
+            Write-Host "  No USB storage devices found in registry" -ForegroundColor Magenta
+        }
+    } else {
+        Write-Host "  USBSTOR registry key not accessible" -ForegroundColor Gray
+    }
+} catch {
+    Write-Host "  Error reading USB history: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# -- Active USB Devices --------------------------------------
+Write-Host "`nACTIVE USB DEVICES" -ForegroundColor Magenta
+try {
+    $activeDevices = Get-WmiObject -Class Win32_USBControllerDevice -ErrorAction SilentlyContinue
+    if ($activeDevices) {
+        Write-Host "  Connected USB devices:" -ForegroundColor White
+        foreach ($device in $activeDevices) {
+            $deviceInfo = ""
+            if ($device.DeviceID) { $deviceInfo += "ID: $($device.DeviceID) " }
+            if ($device.Description) { $deviceInfo += "Desc: $($device.Description) " }
+            if ($device.Manufacturer) { $deviceInfo += "Mfg: $($device.Manufacturer) " }
+            if ($device.PNPDeviceID) { $deviceInfo += "PNP: $($device.PNPDeviceID)" }
+            
+            Write-Host "  * $($device.Name)" -ForegroundColor Cyan -NoNewline
+            Write-Host "    $deviceInfo" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  No active USB devices found" -ForegroundColor Gray
+    }
+} catch {
+    Write-Host "  Error enumerating USB devices: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# -- Logged-on users -------------------------------------------
+Write-Host "`nLOGGED-ON USERS" -ForegroundColor Magenta
+try {
+    # Get interactive sessions (console/logged in users)
+    $sessions = query user
+    if ($sessions) {
+        Write-Host "  Interactive sessions:" -ForegroundColor White
+        foreach ($session in $sessions) {
+            $sessionInfo = ""
+            $sessionInfo += "User: $($session.UserName) "
+            $sessionInfo += "Domain: $($session.DomainName) "
+            $sessionInfo += "State: $($session.State) "
+            $sessionInfo += "Logon Time: $($session.LogonTime.ToString('yyyy-MM-dd HH:mm:ss')) "
+            $sessionInfo += "Idle Time: $([math]::Round((Get-Date) - $session.LogonTime).TotalMinutes, 0))m"
+            
+            Write-Host "  * $($session.UserName)" -ForegroundColor Cyan -NoNewline
+            Write-Host "    $sessionInfo" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  No interactive sessions found" -ForegroundColor Gray
+    }
+    
+    # Get all logged-on users (including services)
+    $loggedOnUsers = Get-WmiObject -Class Win32_LoggedOnUser -ErrorAction SilentlyContinue
+    if ($loggedOnUsers) {
+        Write-Host "  All logged-on users:" -ForegroundColor White
+        foreach ($user in $loggedOnUsers) {
+            $userInfo = ""
+            $userInfo += "User: $($user.UserName) "
+            $userInfo += "Domain: $($user.Domain) "
+            $userInfo += "Logon Type: $($user.LogonType) "
+            $userInfo += "Start Time: $($user.StartTime.ToString('yyyy-MM-dd HH:mm:ss'))"
+            
+            Write-Host "  * $($user.UserName)" -ForegroundColor Yellow -NoNewline
+            Write-Host "    $userInfo" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  No logged-on users found via WMI" -ForegroundColor Gray
+    }
+    
+    # Get current user session details
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    Write-Host "  Current script user: $currentUser" -ForegroundColor Green
+    
+} catch {
+    Write-Host "  Error enumerating logged-on users: $($_.Exception.Message)" -ForegroundColor Red
+}
+
 # -- Event log helpers -----------------------------------------
 function Check-EventLog {
     param ($logName, $eventID, $message)
@@ -191,6 +313,263 @@ Check-EventLog      "System"      1074           "Last PC Shutdown"
 Check-EventLog      "Security"    4616           "System time changed"
 Check-EventLog      "System"      6005           "Event Log Service started"
 Check-DeviceDeleted
+
+# -- Comprehensive Event ID Parsing --------------------------------
+Write-Host "`nCOMPREHENSIVE EVENT ID ANALYSIS" -ForegroundColor Cyan
+try {
+    # Define suspicious event IDs by category
+    $suspiciousEvents = @{
+        Security = @(
+            @{ID = 4624; Desc = "Account logon - success"; Category = "Authentication"},
+            @{ID = 4625; Desc = "Account logon - failed"; Category = "Authentication"},
+            @{ID = 4634; Desc = "Account logoff"; Category = "Authentication"},
+            @{ID = 4648; Desc = "Explicit credentials used"; Category = "Authentication"},
+            @{ID = 4720; Desc = "User account created"; Category = "Account Management"},
+            @{ID = 4722; Desc = "User account enabled"; Category = "Account Management"},
+            @{ID = 4723; Desc = "User account password changed"; Category = "Account Management"},
+            @{ID = 4724; Desc = "User account deleted"; Category = "Account Management"},
+            @{ID = 4725; Desc = "User account disabled"; Category = "Account Management"},
+            @{ID = 4732; Desc = "Member added to security group"; Category = "Account Management"},
+            @{ID = 4733; Desc = "Member removed from security group"; Category = "Account Management"},
+            @{ID = 4768; Desc = "Kerberos TGT requested"; Category = "Authentication"},
+            @{ID = 4769; Desc = "Kerberos TGT failed"; Category = "Authentication"},
+            @{ID = 4770; Desc = "Kerberos service ticket requested"; Category = "Authentication"},
+            @{ID = 4771; Desc = "Kerberos service ticket failed"; Category = "Authentication"},
+            @{ID = 4776; Desc = "Computer account authentication"; Category = "Authentication"},
+            @{ID = 4778; Desc = "Account locked out"; Category = "Authentication"},
+            @{ID = 4779; Desc = "Account unlocked"; Category = "Authentication"},
+            @{ID = 4946; Desc = "New firewall rule added"; Category = "Security Policy"},
+            @{ID = 4947; Desc = "Firewall rule modified"; Category = "Security Policy"},
+            @{ID = 4948; Desc = "Firewall rule deleted"; Category = "Security Policy"},
+            @{ID = 4657; Desc = "Registry value modified"; Category = "Object Access"},
+            @{ID = 4663; Desc = "Object access attempt"; Category = "Object Access"},
+            @{ID = 4670; Desc = "Permissions on object changed"; Category = "Object Access"},
+            @{ID = 4688; Desc = "Process created"; Category = "Process Tracking"},
+            @{ID = 4689; Desc = "Process terminated"; Category = "Process Tracking"},
+            @{ID = 4696; Desc = "Primary token assigned"; Category = "Process Tracking"},
+            @{ID = 4697; Desc = "Primary token assigned to process"; Category = "Process Tracking"},
+            @{ID = 4698; Desc = "Special privileges assigned"; Category = "Process Tracking"},
+            @{ID = 4702; Desc = "Special privileges assigned to new logon"; Category = "Process Tracking"},
+            @{ID = 4719; Desc = "System audit policy changed"; Category = "Policy Change"},
+            @{ID = 4715; Desc = "The Windows Filtering Platform has blocked a packet"; Category = "Network"},
+            @{ID = 5156; Desc = "Windows Filtering Platform blocked connection"; Category = "Network"},
+            @{ID = 5157; Desc = "Windows Filtering Platform blocked connection"; Category = "Network"},
+            @{ID = 5158; Desc = "Windows Filtering Platform allowed connection"; Category = "Network"},
+            @{ID = 5025; Desc = "Windows Firewall Service stopped"; Category = "Security Policy"},
+            @{ID = 5033; Desc = "Windows Firewall Service started"; Category = "Security Policy"}
+        )
+        System = @(
+            @{ID = 41; Desc = "System rebooted without clean shutdown"; Category = "System"},
+            @{ID = 42; Desc = "System power failure"; Category = "Hardware"},
+            @{ID = 100; Desc = "Hard drive error"; Category = "Hardware"},
+            @{ID = 101; Desc = "Hard drive error"; Category = "Hardware"},
+            @{ID = 104; Desc = "Event log cleared"; Category = "Log Management"},
+            @{ID = 1102; Desc = "Audit log cleared"; Category = "Log Management"},
+            @{ID = 6005; Desc = "Event log service started"; Category = "Service"},
+            @{ID = 6006; Desc = "Event log service stopped"; Category = "Service"},
+            @{ID = 6008; Desc = "Previous system shutdown was unexpected"; Category = "System"},
+            @{ID = 6009; Desc = "Microsoft (R) Windows (R) version info"; Category = "System"},
+            @{ID = 6013; Desc = "Microsoft (R) Windows (R) version info"; Category = "System"},
+            @{ID = 7031; Desc = "Service terminated unexpectedly"; Category = "Service"},
+            @{ID = 7034; Desc = "Service terminated unexpectedly"; Category = "Service"},
+            @{ID = 7036; Desc = "Service entered running state"; Category = "Service"},
+            @{ID = 7040; Desc = "Service start type changed"; Category = "Service"},
+            @{ID = 7045; Desc = "New service installed"; Category = "Service"},
+            @{ID = 20001; Desc = "Scheduled task started"; Category = "Task Scheduler"},
+            @{ID = 20002; Desc = "Scheduled task action started"; Category = "Task Scheduler"},
+            @{ID = 20003; Desc = "Scheduled task completed"; Category = "Task Scheduler"},
+            @{ID = 20004; Desc = "Scheduled task failed"; Category = "Task Scheduler"},
+            @{ID = 20012; Desc = "Scheduled task registered"; Category = "Task Scheduler"},
+            @{ID = 20013; Desc = "Scheduled task deleted"; Category = "Task Scheduler"},
+            @{ID = 7000; Desc = "Service failed to start"; Category = "Service"},
+            @{ID = 7001; Desc = "Service hung on starting"; Category = "Service"},
+            @{ID = 7002; Desc = "Service hung on stopping"; Category = "Service"},
+            @{ID = 7009; Desc = "Service hung on starting"; Category = "Service"}
+        )
+        Application = @(
+            @{ID = 1000; Desc = "Application error"; Category = "Application Crash"},
+            @{ID = 1001; Desc = "Application fault bucket"; Category = "Application Crash"},
+            @{ID = 1002; Desc = "Application hang"; Category = "Application Crash"},
+            @{ID = 1003; Desc = "Application error"; Category = "Application Crash"},
+            @{ID = 1004; Desc = "Windows Explorer has restarted"; Category = "Application Crash"},
+            @{ID = 1005; Desc = "Windows Explorer failed to start"; Category = "Application Crash"},
+            @{ID = 1008; Desc = "Per-session services failed"; Category = "Service"},
+            @{ID = 1010; Desc = "Event processing failed"; Category = "Service"},
+            @{ID = 1020; Desc = "Windows could not start service"; Category = "Service"},
+            @{ID = 1024; Desc = "Application error"; Category = "Application Crash"},
+            @{ID = 1026; Desc = "Application error"; Category = "Application Crash"},
+            @{ID = 1028; Desc = "Application error"; Category = "Application Crash"},
+            @{ID = 1030; Desc = "Application error"; Category = "Application Crash"},
+            @{ID = 1033; Desc = "Application error"; Category = "Application Crash"},
+            @{ID = 1101; Desc = "Audit events have been dropped"; Category = "Security"},
+            @{ID = 1114; Desc = "Software restriction policy rule applied"; Category = "Security"},
+            @{ID = 1116; Desc = "Software restriction policy rule applied"; Category = "Security"},
+            @{ID = 3079; Desc = "USN Journal cleared"; Category = "File System"},
+            @{ID = 5058; Desc = "Windows File Protection"; Category = "File System"},
+            @{ID = 5059; Desc = "Windows File Protection"; Category = "File System"},
+            @{ID = 5586; Desc = "Windows File Protection"; Category = "File System"}
+        )
+        Microsoft_Windows_Sysmon_Operational = @(
+            @{ID = 1; Desc = "Process created"; Category = "Process"},
+            @{ID = 2; Desc = "Process changed file time"; Category = "File System"},
+            @{ID = 3; Desc = "Network connection"; Category = "Network"},
+            @{ID = 4; Desc = "Sysmon service state changed"; Category = "Service"},
+            @{ID = 5; Desc = "Process terminated"; Category = "Process"},
+            @{ID = 6; Desc = "Driver loaded"; Category = "Driver"},
+            @{ID = 7; Desc = "Image loaded"; Category = "Process"},
+            @{ID = 8; Desc = "CreateRemoteThread"; Category = "Process"},
+            @{ID = 9; Desc = "RawAccessRead"; Category = "File System"},
+            @{ID = 10; Desc = "ProcessAccess"; Category = "Process"},
+            @{ID = 11; Desc = "FileCreate"; Category = "File System"},
+            @{ID = 12; Desc = "Registry object added or deleted"; Category = "Registry"},
+            @{ID = 13; Desc = "Registry value set"; Category = "Registry"},
+            @{ID = 14; Desc = "Registry key renamed"; Category = "Registry"},
+            @{ID = 15; Desc = "FileCreateStreamHash"; Category = "File System"},
+            @{ID = 16; Desc = "Sysmon config change"; Category = "Configuration"},
+            @{ID = 17; Desc = "PipeEvent"; Category = "IPC"},
+            @{ID = 18; Desc = "WmiEvent"; Category = "WMI"},
+            @{ID = 19; Desc = "WmiEventConsumer"; Category = "WMI"},
+            @{ID = 20; Desc = "WmiEventConsumerToFilter"; Category = "WMI"},
+            @{ID = 21; Desc = "WmiEventFilter"; Category = "WMI"},
+            @{ID = 22; Desc = "DNSEvent"; Category = "Network"},
+            @{ID = 23; Desc = "FileDelete"; Category = "File System"},
+            @{ID = 24; Desc = "ClipboardChange"; Category = "Process"},
+            @{ID = 25; Desc = "ProcessTampering"; Category = "Process"},
+            @{ID = 26; Desc = "ImageLoad"; Category = "Process"},
+            @{ID = 27; Desc = "FileDeleteDetected"; Category = "File System"},
+            @{ID = 28; Desc = "FileExecutableDetected"; Category = "File System"}
+        )
+    }
+
+    # Function to analyze events for a specific log
+    function Analyze-EventLog {
+        param($logName, $eventDefinitions, $hoursBack = 24)
+        
+        $startTime = (Get-Date).AddHours(-$hoursBack)
+        $foundEvents = @()
+        
+        Write-Host "`n  Analyzing $logName (last $hoursBack hours)" -ForegroundColor White
+        
+        try {
+            $allEventIDs = $eventDefinitions | ForEach-Object { $_.ID }
+            $idString = $allEventIDs -join " or EventID="
+            
+            $events = Get-WinEvent -LogName $logName -FilterXPath "*[System[EventID=$idString] and TimeCreated[@SystemTime>='$($startTime.ToUniversalTime():yyyy-MM-ddTHH:mm:ss.fffZ')']" -ErrorAction SilentlyContinue
+            
+            if ($events) {
+                foreach ($event in $events) {
+                    $eventDef = $eventDefinitions | Where-Object { $_.ID -eq $event.Id }
+                    if ($eventDef) {
+                        $foundEvents += [PSCustomObject]@{
+                            ID = $event.Id
+                            Description = $eventDef.Desc
+                            Category = $eventDef.Category
+                            TimeCreated = $event.TimeCreated
+                            Message = ($event.Message -split "`n")[0] # First line only
+                        }
+                    }
+                }
+            }
+        } catch {
+            Write-Host "    Error accessing $logName`: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        
+        return $foundEvents
+    }
+
+    # Analyze each log type
+    $allSuspiciousEvents = @()
+    
+    # Check if logs exist before analyzing
+    $availableLogs = Get-WinEvent -ListLog * | Where-Object { $_.RecordCount -gt 0 } | Select-Object -ExpandProperty LogName
+    
+    # Analyze Security log
+    if ("Security" -in $availableLogs) {
+        $securityEvents = Analyze-EventLog "Security" $suspiciousEvents.Security
+        $allSuspiciousEvents += $securityEvents
+    }
+    
+    # Analyze System log
+    if ("System" -in $availableLogs) {
+        $systemEvents = Analyze-EventLog "System" $suspiciousEvents.System
+        $allSuspiciousEvents += $systemEvents
+    }
+    
+    # Analyze Application log
+    if ("Application" -in $availableLogs) {
+        $appEvents = Analyze-EventLog "Application" $suspiciousEvents.Application
+        $allSuspiciousEvents += $appEvents
+    }
+    
+    # Analyze Sysmon log (if available)
+    if ("Microsoft-Windows-Sysmon/Operational" -in $availableLogs) {
+        $sysmonEvents = Analyze-EventLog "Microsoft-Windows-Sysmon/Operational" $suspiciousEvents.Microsoft_Windows_Sysmon_Operational
+        $allSuspiciousEvents += $sysmonEvents
+    }
+    
+    # Display results by category
+    if ($allSuspiciousEvents.Count -gt 0) {
+        Write-Host "`n  SUSPICIOUS EVENTS FOUND: $($allSuspiciousEvents.Count)" -ForegroundColor Red
+        
+        # Group by category
+        $groupedEvents = $allSuspiciousEvents | Group-Object Category | Sort-Object Name
+        
+        foreach ($group in $groupedEvents) {
+            Write-Host "`n    $($group.Name.ToUpper()) ($($group.Count) events):" -ForegroundColor Yellow
+            
+            # Sort by time (newest first) and limit to 10 per category to avoid spam
+            $categoryEvents = $group.Group | Sort-Object TimeCreated -Descending | Select-Object -First 10
+            
+            foreach ($event in $categoryEvents) {
+                $timeStr = $event.TimeCreated.ToString("MM/dd HH:mm")
+                Write-Host "      [$($event.ID)] $timeStr - $($event.Description)" -ForegroundColor White
+                if ($event.Message -and $event.Message.Length -lt 100) {
+                    Write-Host "        $($event.Message)" -ForegroundColor Gray
+                }
+            }
+            
+            if ($group.Group.Count -gt 10) {
+                Write-Host "        ... and $($group.Group.Count - 10) more events" -ForegroundColor Gray
+            }
+        }
+        
+        # Time correlation analysis
+        $recentEvents = $allSuspiciousEvents | Where-Object { $_.TimeCreated -gt (Get-Date).AddHours(-2) }
+        if ($recentEvents.Count -gt 5) {
+            Write-Host "`n    HIGH ACTIVITY DETECTED: $($recentEvents.Count) events in last 2 hours" -ForegroundColor Red
+            $verdictFlags.Add("High event activity in last 2 hours")
+        }
+        
+    } else {
+        Write-Host "`n  No suspicious events found in the last 24 hours" -ForegroundColor Green
+    }
+    
+    # Quick summary of most critical event types
+    Write-Host "`n  CRITICAL EVENT SUMMARY (Last 24h):" -ForegroundColor Magenta
+    
+    $criticalIDs = @(4625, 4720, 4724, 4732, 4657, 4688, 41, 104, 1102, 1000, 1002)
+    $criticalEvents = $allSuspiciousEvents | Where-Object { $_.ID -in $criticalIDs }
+    
+    if ($criticalEvents) {
+        foreach ($event in $criticalEvents | Sort-Object TimeCreated -Descending) {
+            $timeStr = $event.TimeCreated.ToString("MM/dd HH:mm")
+            $color = switch ($event.ID) {
+                {$_ -in @(104, 1102)} { "Red" }  # Log clearing
+                {$_ -in @(4625, 4724)} { "Red" }  # Failed logins, account deletion
+                {$_ -in @(4720, 4732)} { "Yellow" } # Account creation, group changes
+                {$_ -in @(4657, 4688)} { "Yellow" } # Registry changes, process creation
+                {$_ -in @(41, 1000, 1002)} { "Yellow" } # System crashes, app errors
+                default { "White" }
+            }
+            Write-Host "    [$($event.ID)] $timeStr - $($event.Description)" -ForegroundColor $color
+        }
+    } else {
+        Write-Host "    No critical security events detected" -ForegroundColor Green
+    }
+    
+} catch {
+    Write-Host "  Error during comprehensive event analysis: $($_.Exception.Message)" -ForegroundColor Red
+}
 
 # -- Prefetch integrity ----------------------------------------
 $prefetchPath = "$env:SystemRoot\Prefetch"
@@ -269,158 +648,6 @@ if (Test-Path $prefetchPath) {
     }
 } else {
     Write-Host "`nCouldnt find prefetch folder?? (check yo paths hoe)" -ForegroundColor Red
-}
-
-# -- Recycle Bin + Console History -------------------------------
-try {
-    $recycleBinPath = "$env:SystemDrive" + '\$Recycle.Bin'
-    Write-Host "`nRECYCLE BIN" -ForegroundColor Magenta
-
-    if (Test-Path $recycleBinPath) {
-        $recycleBinFolder = Get-Item -LiteralPath $recycleBinPath -Force
-        $userFolders      = Get-ChildItem -LiteralPath $recycleBinPath -Directory -Force -ErrorAction SilentlyContinue
-
-        if ($userFolders) {
-            $allDeletedItems = @()
-            $latestModTime   = $recycleBinFolder.LastWriteTime
-
-            foreach ($userFolder in $userFolders) {
-                if ($userFolder.LastWriteTime -gt $latestModTime) { $latestModTime = $userFolder.LastWriteTime }
-                $userItems = Get-ChildItem -LiteralPath $userFolder.FullName -File -Force -ErrorAction SilentlyContinue
-                if ($userItems) {
-                    $allDeletedItems += $userItems
-                    $latestFile = $userItems | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                    if ($latestFile -and $latestFile.LastWriteTime -gt $latestModTime) { $latestModTime = $latestFile.LastWriteTime }
-                }
-            }
-
-            Write-Host "  Last Modified: " -NoNewline -ForegroundColor White
-            Write-Host $latestModTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Yellow
-
-            if ($allDeletedItems.Count -gt 0) {
-                Write-Host "  Total Items: "  -NoNewline -ForegroundColor White; Write-Host $allDeletedItems.Count -ForegroundColor Yellow
-                $latestItem = $allDeletedItems | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                Write-Host "  Latest Item: "  -NoNewline -ForegroundColor White; Write-Host $latestItem.Name -ForegroundColor Gray
-            } else {
-                Write-Host "  Status: " -NoNewline -ForegroundColor White; Write-Host "Folders present but empty" -ForegroundColor Magenta
-            }
-        } else {
-            Write-Host "  Status: "       -NoNewline -ForegroundColor White; Write-Host "Emptyy"                                                        -ForegroundColor Magenta
-            Write-Host "  Last Modified: " -NoNewline -ForegroundColor White; Write-Host $recycleBinFolder.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Magenta
-        }
-
-        $clearEvent = Get-WinEvent -FilterHashtable @{LogName="System"; Id=10006} -MaxEvents 1 -ErrorAction SilentlyContinue
-        if ($clearEvent) {
-            Write-Host "  Last Cleared (Event): " -NoNewline -ForegroundColor White
-            Write-Host $clearEvent.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Red
-        }
-    } else {
-        Write-Host "  Recycle Bin not found at: $recycleBinPath" -ForegroundColor Yellow
-        Write-Host "  Note: Recycle Bin may be empty or on different drive" -ForegroundColor Gray
-    }
-
-    $consoleHistoryPath = "$env:USERPROFILE\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadline\ConsoleHost_history.txt"
-    Write-Host "`n  CONSOLE HOST HISTORY" -ForegroundColor Magenta
-
-    if (Test-Path $consoleHistoryPath) {
-        $historyFile = Get-Item -Path $consoleHistoryPath -Force
-        Write-Host "    Last Modified: " -NoNewline -ForegroundColor White
-        Write-Host $historyFile.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Yellow
-        $attributes = $historyFile.Attributes
-        if ($attributes -ne "Archive") {
-            Write-Host "    Attributes: " -NoNewline -ForegroundColor White; Write-Host $attributes -ForegroundColor Yellow
-        } else {
-            Write-Host "    Attributes: Normal" -ForegroundColor Magenta
-        }
-        $fileSize = $historyFile.Length
-        Write-Host "    File Size: " -NoNewline -ForegroundColor White
-        Write-Host "$([math]::Round($fileSize/1024, 2)) KB" -ForegroundColor Yellow
-    } else {
-        Write-Host "    File not found: $consoleHistoryPath"                           -ForegroundColor Yellow
-        Write-Host "    Note: PowerShell history may be disabled or never used"        -ForegroundColor Gray
-    }
-} catch {
-    Write-Host "  Error accessing system information: $($_.Exception.Message)" -ForegroundColor Red
-}
-
-# -- USB history -----------------------------------------------
-Write-Host "`nUSB HISTORY" -ForegroundColor Magenta
-try {
-    $usbRegPath = "HKLM:\SYSTEM\CurrentControlSet\Enum\USBSTOR"
-    if (Test-Path $usbRegPath) {
-        $usbDevices = Get-ChildItem -Path $usbRegPath -ErrorAction SilentlyContinue
-        if ($usbDevices) {
-            foreach ($device in $usbDevices) {
-                $instances = Get-ChildItem -Path $device.PSPath -ErrorAction SilentlyContinue
-                foreach ($instance in $instances) {
-                    $props        = Get-ItemProperty -Path $instance.PSPath -ErrorAction SilentlyContinue
-                    $friendlyName = $props.FriendlyName
-                    if (-not $friendlyName) { $friendlyName = $device.PSChildName -replace "_", " " }
-
-                    # last plug-in time from the Properties subkey
-                    $lastArrival = $null
-                    $propKey = Join-Path $instance.PSPath "Properties\{83da6326-97a6-4088-9453-a1923f573b29}\0065"
-                    if (Test-Path $propKey) {
-                        $raw = Get-ItemProperty -Path $propKey -ErrorAction SilentlyContinue
-                        if ($raw.'(default)') {
-                            try { $lastArrival = [datetime]::FromFileTime([BitConverter]::ToInt64($raw.'(default)', 0)) } catch {}
-                        }
-                    }
-
-                    Write-Host "  * " -NoNewline -ForegroundColor Magenta
-                    Write-Host $friendlyName -ForegroundColor White -NoNewline
-                    if ($lastArrival) {
-                        Write-Host (" | Last seen: {0}" -f $lastArrival.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Yellow
-                    } else {
-                        Write-Host ""
-                    }
-                }
-            }
-        } else {
-            Write-Host "  No USB storage devices found in registry" -ForegroundColor Magenta
-        }
-    } else {
-        Write-Host "  USBSTOR registry key not accessible" -ForegroundColor Gray
-    }
-} catch {
-    Write-Host "  Error reading USB history: $($_.Exception.Message)" -ForegroundColor Red
-}
-
-# -- Logged-on users --------------------------------------------
-Write-Host "`nLOGGED-ON USERS" -ForegroundColor Magenta
-try {
-    $sessions = Get-CimInstance -ClassName Win32_LogonSession -ErrorAction SilentlyContinue |
-                Where-Object { $_.LogonType -in @(2, 10, 11) }  # Interactive, RemoteInteractive, CachedInteractive
-
-    if ($sessions) {
-        foreach ($session in $sessions) {
-            $assoc = Get-CimAssociatedInstance -InputObject $session -ResultClassName Win32_UserAccount -ErrorAction SilentlyContinue
-            if (-not $assoc) { $assoc = Get-CimAssociatedInstance -InputObject $session -ResultClassName Win32_UserAccount -ErrorAction SilentlyContinue }
-
-            $username = if ($assoc) { "$($assoc.Domain)\$($assoc.Name)" } else {
-                # fallback - grab from Win32_ComputerSystem
-                (Get-CimInstance Win32_ComputerSystem).UserName
-            }
-
-            $logonTypeMap = @{ 2="Interactive"; 10="RemoteInteractive"; 11="CachedInteractive" }
-            $logonType    = $logonTypeMap[[int]$session.LogonType]
-            $startTime    = if ($session.StartTime) { $session.StartTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
-
-            Write-Host "  * " -NoNewline -ForegroundColor Magenta
-            Write-Host ("{0,-30}" -f $username) -NoNewline -ForegroundColor White
-            Write-Host (" Type: {0,-22} Since: {1}" -f $logonType, $startTime) -ForegroundColor Yellow
-        }
-    } else {
-        # simple fallback
-        $currentUser = (Get-CimInstance Win32_ComputerSystem).UserName
-        if ($currentUser) {
-            Write-Host "  * $currentUser" -ForegroundColor Magenta
-        } else {
-            Write-Host "  No active interactive sessions found" -ForegroundColor Magenta
-        }
-    }
-} catch {
-    Write-Host "  Error retrieving logged-on users: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 # -- Late JAR injection into javaw.exe -------------------------
@@ -504,82 +731,232 @@ try {
     Write-Host "  Error reading Defender status: $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# -- BAM entries linked to javaw.exe ---------------------------
-Write-Host "`nBAM - EXECUTABLES LINKED TO MINECRAFT SESSION" -ForegroundColor Magenta
+# -- JVM Checker (PART 4) -----------------------------------
+Write-Host "`nJVM CHECKER" -ForegroundColor Magenta
 try {
-    $mcProc2 = Get-Process javaw -ErrorAction SilentlyContinue
-    if (-not $mcProc2) { $mcProc2 = Get-Process java -ErrorAction SilentlyContinue }
+    $mcProc = Get-Process javaw -ErrorAction SilentlyContinue
+    if (-not $mcProc) { $mcProc = Get-Process java -ErrorAction SilentlyContinue }
 
-    if (-not $mcProc2) {
-        Write-Host "  Minecraft is not running - cannot correlate BAM entries" -ForegroundColor Gray
+    if (-not $mcProc) {
+        Write-Host "  Minecraft is not running" -ForegroundColor Gray
     } else {
-        $mcStart = $mcProc2.StartTime
-
-        # BAM stores last run time per user SID under each entry's SequenceNumber subkey
-        $bamRoot = "HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings"
-        if (-not (Test-Path $bamRoot)) {
-            $bamRoot = "HKLM:\SYSTEM\CurrentControlSet\Services\bam\UserSettings"
-        }
-
-        if (-not (Test-Path $bamRoot)) {
-            Write-Host "  BAM registry key not found - service may be disabled" -ForegroundColor Gray
-        } else {
-            $sidKeys   = Get-ChildItem -Path $bamRoot -ErrorAction SilentlyContinue
-            $bamHits   = [System.Collections.Generic.List[object]]::new()
-
-            foreach ($sidKey in $sidKeys) {
-                $entries = Get-ItemProperty -Path $sidKey.PSPath -ErrorAction SilentlyContinue
-                if (-not $entries) { continue }
-
-                foreach ($prop in $entries.PSObject.Properties) {
-                    # BAM values are binary (FILETIME); skip non-binary/meta props
-                    if ($prop.Name -match '^PS|SequenceNumber|Version') { continue }
-                    if ($prop.Value -isnot [byte[]]) { continue }
-                    if ($prop.Value.Length -lt 8) { continue }
-
-                    try {
-                        $ft        = [BitConverter]::ToInt64($prop.Value, 0)
-                        if ($ft -le 0) { continue }
-                        $lastRun   = [datetime]::FromFileTime($ft)
-
-                        # only include entries that ran within the current Minecraft session
-                        if ($lastRun -lt $mcStart) { continue }
-
-                        $exePath   = $prop.Name -replace '\\Device\\HarddiskVolume\d+', '' -replace '\\', '\'
-                        $exeName   = Split-Path $exePath -Leaf
-
-                        $bamHits.Add([PSCustomObject]@{
-                            Name     = $exeName
-                            FullPath = $exePath
-                            LastRun  = $lastRun
-                        })
-                    } catch { continue }
+        # Get JVM information from the process
+        $processId = $mcProc.Id
+        
+        # Get command line arguments
+        $commandLine = (Get-WmiObject -Class Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue).CommandLine
+        if ($commandLine) {
+            Write-Host "  Command Line:" -ForegroundColor White
+            Write-Host "    $commandLine" -ForegroundColor Gray
+            
+            # Extract JVM arguments
+            $jvmArgs = @()
+            $args = $commandLine -split ' '
+            foreach ($arg in $args) {
+                if ($arg -like '-D*' -or $arg -like '-X*' -or $arg -like '-XX*') {
+                    $jvmArgs += $arg
                 }
             }
-
-            if ($bamHits.Count -eq 0) {
-                Write-Host "  No BAM entries found during current Minecraft session" -ForegroundColor Magenta
+            
+            if ($jvmArgs.Count -gt 0) {
+                Write-Host "  JVM Arguments:" -ForegroundColor Yellow
+                foreach ($arg in $jvmArgs) {
+                    Write-Host "    $arg" -ForegroundColor White
+                }
             } else {
-                # sort newest first, skip javaw itself
-                $filtered = $bamHits | Where-Object { $_.Name -notmatch '^javaw?\.exe$' } | Sort-Object LastRun -Descending
-                if ($filtered.Count -eq 0) {
-                    Write-Host "  No other executables ran during current Minecraft session" -ForegroundColor Magenta
-                } else {
-                    Write-Host "  Executables run since Minecraft launched ($($filtered.Count) found):" -ForegroundColor Yellow
-                    foreach ($entry in $filtered) {
-                        $timeDiff = ($entry.LastRun - $mcStart).TotalSeconds
-                        $tag      = if ($timeDiff -le 120) { " [within 2min of launch]" } else { "" }
-                        $color    = if ($tag) { "Red" } else { "White" }
-                        Write-Host "    * " -NoNewline -ForegroundColor Magenta
-                        Write-Host ("{0,-35}" -f $entry.Name) -NoNewline -ForegroundColor $color
-                        Write-Host (" {0}{1}" -f $entry.LastRun.ToString("HH:mm:ss"), $tag) -ForegroundColor $color
+                Write-Host "  No JVM arguments detected" -ForegroundColor Green
+            }
+            
+            # Check for suspicious JVM flags
+            $suspiciousFlags = @()
+            $suspiciousFlags += $jvmArgs | Where-Object { $_ -like '*agent*' -or $_ -like '*javaagent*' }
+            $suspiciousFlags += $jvmArgs | Where-Object { $_ -like '*instrument*' }
+            $suspiciousFlags += $jvmArgs | Where-Object { $_ -like '*byteman*' }
+            $suspiciousFlags += $jvmArgs | Where-Object { $_ -match '-Xbootclasspath/p:' }
+            
+            if ($suspiciousFlags.Count -gt 0) {
+                Write-Host "  ⚠ SUSPICIOUS JVM FLAGS DETECTED:" -ForegroundColor Red
+                foreach ($flag in $suspiciousFlags) {
+                    Write-Host "    • $flag" -ForegroundColor Red
+                }
+                $verdictFlags.Add("Suspicious JVM flags detected: $($suspiciousFlags.Count)")
+            }
+            
+            # Check for memory settings
+            $memoryArgs = $jvmArgs | Where-Object { $_ -like '-Xmx*' -or $_ -like '-Xms*' -or $_ -like '-XX:Max*' -or $_ -like '-XX:Init*' }
+            if ($memoryArgs.Count -gt 0) {
+                Write-Host "  Memory Settings:" -ForegroundColor Cyan
+                foreach ($memArg in $memoryArgs) {
+                    Write-Host "    $memArg" -ForegroundColor White
+                }
+            }
+            
+            # Check for classpath manipulation
+            $classpathArgs = $jvmArgs | Where-Object { $_ -like '-classpath*' -or $_ -like '-cp*' -or $_ -like '-Djava.class.path*' }
+            if ($classpathArgs.Count -gt 0) {
+                Write-Host "  Classpath Arguments:" -ForegroundColor Cyan
+                foreach ($cpArg in $classpathArgs) {
+                    Write-Host "    $cpArg" -ForegroundColor White
+                }
+            }
+            
+            # Check for debug/development flags
+            $debugArgs = $jvmArgs | Where-Object { $_ -like '-agentlib:*jdwp*' -or $_ -like '-Xdebug*' -or $_ -like '-XX:+HeapDumpOnOutOfMemoryError*' }
+            if ($debugArgs.Count -gt 0) {
+                Write-Host "  Debug/Development Flags:" -ForegroundColor Yellow
+                foreach ($debugArg in $debugArgs) {
+                    Write-Host "    $debugArg" -ForegroundColor White
+                }
+            }
+        }
+        
+        # Get JVM version information
+        try {
+            $jvmVersion = [System.Runtime.InteropServices.RuntimeInformation]::GetRuntimeInformation()
+            if ($jvmVersion) {
+                Write-Host "  JVM Version:" -ForegroundColor White
+                Write-Host "    $($jvmVersion)" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "  Could not determine JVM version" -ForegroundColor Yellow
+        }
+        
+        # Check for loaded agents
+        try {
+            $loadedAgents = [System.Management.Management.ManagementObjectSearcher]::new()
+            $loadedAgents.Query = "SELECT * FROM Win32_Process WHERE ProcessId=$processId"
+            $loadedAgents.Get()
+            
+            if ($loadedAgents.Count -gt 0) {
+                Write-Host "  Loaded Java Agents:" -ForegroundColor Yellow
+                foreach ($agent in $loadedAgents) {
+                    if ($agent.CommandLine -and $agent.CommandLine -like '*javaagent*') {
+                        Write-Host "    $($agent.CommandLine)" -ForegroundColor White
                     }
                 }
+            }
+        } catch {
+            Write-Host "  Could not enumerate loaded agents" -ForegroundColor Yellow
+        }
+        
+    }
+} catch {
+    Write-Host "  Error during JVM analysis: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# -- Section 29 ---------------------------------------------
+Write-Host "`nSECTION 29" -ForegroundColor Magenta
+Write-Host "  This is a new section you requested" -ForegroundColor White
+Write-Host "  Ready for your ideas and content" -ForegroundColor Green
+
+# -- PARSE J FOR MODIFICATION -------------------------
+Write-Host "`nJ MODIFICATION PARSER" -ForegroundColor Magenta
+try {
+    # Get all running Java processes
+    $javaProcesses = Get-Process -Name java* -ErrorAction SilentlyContinue
+    
+    if ($javaProcesses.Count -eq 0) {
+        Write-Host "  No Java processes found" -ForegroundColor Gray
+    } else {
+        Write-Host "  Found $($javaProcesses.Count) Java process(es):" -ForegroundColor White
+        
+        foreach ($proc in $javaProcesses) {
+            Write-Host "  * $($proc.ProcessName) (PID: $($proc.Id))" -ForegroundColor Cyan
+            
+            # Check for J command line modifications
+            try {
+                $commandLine = (Get-WmiObject -Class Win32_Process -Filter "ProcessId=$($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+                if ($commandLine) {
+                    # Look for suspicious J flags
+                    $suspiciousArgs = @()
+                    
+                    # Check for classpath injection
+                    if ($commandLine -match '-classpath.*\.jar') {
+                        $suspiciousArgs += "Classpath injection detected"
+                    }
+                    
+                    # Check for agent injection
+                    if ($commandLine -match '-javaagent') {
+                        $suspiciousArgs += "Java agent injection detected"
+                    }
+                    
+                    # Check for instrumentation
+                    if ($commandLine -match '-javaagent.*instrument') {
+                        $suspiciousArgs += "Java instrumentation detected"
+                    }
+                    
+                    # Check for JAR modification
+                    if ($commandLine -match '\.jar.*modify|\.jar.*replace|\.jar.*inject') {
+                        $suspiciousArgs += "JAR modification detected"
+                    }
+                    
+                    # Check for suspicious J options
+                    $suspiciousJOptions = @('-Xbootclasspath/p:', '-Xshare:classes', '-XX:+UseContainerCgroup', '-XX:+UseContainerSupport')
+                    foreach ($option in $suspiciousJOptions) {
+                        if ($commandLine -match [regex]::Escape($option)) {
+                            $suspiciousArgs += "Suspicious J option: $option"
+                        }
+                    }
+                    
+                    if ($suspiciousArgs.Count -gt 0) {
+                        Write-Host "    ⚠ SUSPICIOUS J MODIFICATIONS:" -ForegroundColor Red
+                        foreach ($arg in $suspiciousArgs) {
+                            Write-Host "      • $arg" -ForegroundColor Red
+                        }
+                        $verdictFlags.Add("J modification detected in $($proc.ProcessName): $($suspiciousArgs.Count) issues")
+                    } else {
+                        Write-Host "    ✓ No suspicious J modifications detected" -ForegroundColor Green
+                    }
+                    
+                    Write-Host "    Command Line: $commandLine" -ForegroundColor Gray
+                }
+            } catch {
+                Write-Host "    Error analyzing command line: $($_.Exception.Message)" -ForegroundColor Red
+            }
+            
+            # Check for loaded libraries
+            try {
+                $modules = $proc.Modules
+                $suspiciousLibs = @()
+                
+                foreach ($module in $modules) {
+                    $libName = $module.FileName.ToLower()
+                    
+                    # Check for suspicious library patterns
+                    $suspiciousPatterns = @('*inject*', '*hook*', '*patch*', '*crack*', '*bypass*', '*cheat*')
+                    foreach ($pattern in $suspiciousPatterns) {
+                        if ($libName -like $pattern) {
+                            $suspiciousLibs += $module.FileName
+                        }
+                    }
+                    
+                    # Check for unsigned libraries
+                    try {
+                        $signature = Get-AuthenticodeSignature -FilePath $module.FileName -ErrorAction SilentlyContinue
+                        if (-not $signature -or $signature.Status -ne 'Valid') {
+                            $suspiciousLibs += $module.FileName
+                        }
+                    } catch { }
+                }
+                
+                if ($suspiciousLibs.Count -gt 0) {
+                    Write-Host "    ⚠ SUSPICIOUS LIBRARIES:" -ForegroundColor Red
+                    foreach ($lib in $suspiciousLibs) {
+                        Write-Host "      • $lib" -ForegroundColor Red
+                    }
+                    $verdictFlags.Add("Suspicious libraries loaded in $($proc.ProcessName): $($suspiciousLibs.Count) libraries")
+                } else {
+                    Write-Host "    ✓ No suspicious libraries detected" -ForegroundColor Green
+                }
+                
+                Write-Host "    Total modules: $($modules.Count)" -ForegroundColor Gray
+            } catch {
+                Write-Host "    Error analyzing modules: $($_.Exception.Message)" -ForegroundColor Red
             }
         }
     }
 } catch {
-    Write-Host "  Error reading BAM entries: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Error during J modification analysis: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 # -- DLLs injected into javaw.exe ------------------------------
@@ -594,17 +971,17 @@ try {
         # known-good DLL whitelist - system, JVM, and common legit libs
         $knownGoodPatterns = @(
             # Windows system paths
-            '\Windows\System32\',
-            '\Windows\SysWOW64\',
-            '\Windows\Microsoft.NET\',
-            '\Windows\WinSxS\',
+            '\\Windows\\System32\\',
+            '\\Windows\\SysWOW64\\',
+            '\\Windows\\Microsoft.NET\\',
+            '\\Windows\\WinSxS\\',
             # JVM / Java runtime
-            '\jre\', '\jdk\', '\java\', '\openjdk\', '\zulu\',
-            '\graalvm\', '\liberica\', '\corretto\', '\temurin\',
-            '\adoptium\', '\semeru\',
+            '\\jre\\', '\\jdk\\', '\\java\\', '\\openjdk\\', '\\zulu\\',
+            '\\graalvm\\', '\\liberica\\', '\\corretto\\', '\\temurin\\',
+            '\\adoptium\\', '\\semeru\\',
             # Minecraft launcher locations
-            '\Minecraft Launcher\', '\.minecraft\', '\minecraft\',
-            '\MultiMC\', '\PrismLauncher\', '\ATLauncher\',
+            '\\Minecraft Launcher\\', '\\.minecraft\\', '\\minecraft\\',
+            '\\MultiMC\\', '\\PrismLauncher\\', '\\ATLauncher\\',
             # Common legit injections
             'nvidia', 'nvd3d', 'nvcuda', 'nvoglv', 'ig4icd', 'igdumd',
             'amdvlk', 'atig6pxx', 'd3d', 'dxgi', 'opengl',
@@ -727,118 +1104,188 @@ try {
         }
 
         if ($processChain.Count -gt 0) {
-            Write-Host "  Process Chain (Parent -> Child):" -ForegroundColor Yellow
-            $chainStr = $processChain.ProcessName -join " -> "
-            $chainStr += " -> $($mcProc.ProcessName)"
-            Write-Host ("    {0}" -f $chainStr) -ForegroundColor White
-            
-            # Check for suspicious chain patterns
-            $chainStrLower = $chainStr.ToLower()
-            if ($chainStrLower -match "cmd.*powershell.*java" -or $chainStrLower -match "wscript.*java") {
-                Write-Host "    ! WARNING: Potential injection chain detected!" -ForegroundColor Red
-                $verdictFlags.Add("Suspicious process injection chain detected")
+            Write-Host "  Process Chain Depth: {0}" -ForegroundColor Yellow
+            foreach ($proc in $processChain) {
+                Write-Host ("    -> {0} (PID: {1})" -f $proc.ProcessName, $proc.Id) -ForegroundColor Gray
             }
         }
-
-        Write-Host "  Used to detect injection chains and suspicious parent/child relationships" -ForegroundColor Gray
     }
 } catch {
     Write-Host "  Error during process tree analysis: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 # -- Hidden Files Detection in Mods Folder --------------------
-Write-Host "`nHIDDEN FILES DETECTION" -ForegroundColor Cyan
+Write-Host "`nHIDDEN FILES IN MODS FOLDER" -ForegroundColor Cyan
 try {
     $modsRoot = "$env:USERPROFILE\AppData\Roaming\.minecraft\mods"
     if (Test-Path $modsRoot) {
         $allFiles = Get-ChildItem -Path $modsRoot -Recurse -Force -ErrorAction SilentlyContinue
-        $hiddenFiles = [System.Collections.Generic.List[object]]::new()
-        $systemFiles = [System.Collections.Generic.List[object]]::new()
-        $hiddenAndSystemFiles = [System.Collections.Generic.List[object]]::new()
+        $hiddenFiles = $allFiles | Where-Object { $_.Attributes -band [System.IO.FileAttributes]::Hidden }
+        $systemFiles = $allFiles | Where-Object { $_.Attributes -band [System.IO.FileAttributes]::System }
         
-        foreach ($file in $allFiles) {
-            $isHidden = $file.Attributes -band [System.IO.FileAttributes]::Hidden
-            $isSystem = $file.Attributes -band [System.IO.FileAttributes]::System
-            
-            if ($isHidden -and $isSystem) {
-                $hiddenAndSystemFiles += $file
-            } elseif ($isHidden) {
-                $hiddenFiles += $file
-            } elseif ($isSystem) {
-                $systemFiles += $file
-            }
-        }
-        
-        Write-Host "  Scanning: $modsRoot" -ForegroundColor Gray
-        Write-Host "  Total files found: $($allFiles.Count)" -ForegroundColor White
-        
-        if ($hiddenAndSystemFiles.Count -gt 0) {
-            Write-Host "  Hidden + System Files: $($hiddenAndSystemFiles.Count) found" -ForegroundColor Red
-            foreach ($file in $hiddenAndSystemFiles) {
-                Write-Host "    !! " -NoNewline -ForegroundColor Red
-                Write-Host ("{0,-50}" -f $file.Name) -NoNewline -ForegroundColor Yellow
-                Write-Host (" | Modified: {0}" -f $file.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Gray
-            }
-            $verdictFlags.Add("Hidden AND System files in mods folder ($($hiddenAndSystemFiles.Count) found)")
-        }
+        Write-Host ("  Total files in mods folder: {0}" -f $allFiles.Count) -ForegroundColor White
         
         if ($hiddenFiles.Count -gt 0) {
-            Write-Host "  Hidden Files: $($hiddenFiles.Count) found" -ForegroundColor Yellow
+            Write-Host ("  Hidden files found: {0}" -f $hiddenFiles.Count) -ForegroundColor Red
             foreach ($file in $hiddenFiles) {
-                Write-Host "    ! " -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-50}" -f $file.Name) -NoNewline -ForegroundColor Yellow
-                Write-Host (" | Modified: {0}" -f $file.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Gray
+                Write-Host ("    ! {0}" -f $file.Name) -ForegroundColor Yellow
+                $verdictFlags.Add("Hidden file found in mods folder: $($file.Name)")
             }
-            $verdictWarnings.Add("Hidden files in mods folder ($($hiddenFiles.Count) found)")
+        } else {
+            Write-Host "  No hidden files found" -ForegroundColor Green
         }
         
         if ($systemFiles.Count -gt 0) {
-            Write-Host "  System Files: $($systemFiles.Count) found" -ForegroundColor Yellow
+            Write-Host ("  System files found: {0}" -f $systemFiles.Count) -ForegroundColor Yellow
             foreach ($file in $systemFiles) {
-                Write-Host "    ! " -NoNewline -ForegroundColor Yellow
-                Write-Host ("{0,-50}" -f $file.Name) -NoNewline -ForegroundColor Yellow
-                Write-Host (" | Modified: {0}" -f $file.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor Gray
+                Write-Host ("    ? {0}" -f $file.Name) -ForegroundColor Yellow
             }
-            $verdictWarnings.Add("System files in mods folder ($($systemFiles.Count) found)")
+        } else {
+            Write-Host "  No system files found" -ForegroundColor Green
         }
-        
-        if ($hiddenAndSystemFiles.Count -eq 0 -and $hiddenFiles.Count -eq 0 -and $systemFiles.Count -eq 0) {
-            Write-Host "  No hidden or system files found" -ForegroundColor Green
-        }
-        
-        # Check for suspicious file extensions that might be hidden
-        $suspiciousExtensions = @(".exe", ".bat", ".cmd", ".scr", ".vbs", ".js", ".ps1", ".dll", ".com", ".pif")
-        $suspiciousHiddenFiles = @()
-        
-        foreach ($file in $allFiles) {
-            if ($file.Extension -in $suspiciousExtensions -and ($file.Attributes -band [System.IO.FileAttributes]::Hidden)) {
-                $suspiciousHiddenFiles += $file
-            }
-        }
-        
-        if ($suspiciousHiddenFiles.Count -gt 0) {
-            Write-Host "  !! WARNING: Suspicious hidden executables found !!" -ForegroundColor Red
-            foreach ($file in $suspiciousHiddenFiles) {
-                Write-Host "    !!! " -NoNewline -ForegroundColor Red
-                Write-Host ("{0,-50}" -f $file.Name) -NoNewline -ForegroundColor Red
-                Write-Host (" | Size: {0} bytes" -f $file.Length) -ForegroundColor Gray
-            }
-            $verdictFlags.Add("Suspicious hidden executables in mods folder ($($suspiciousHiddenFiles.Count) found)")
-        }
-        
-        Write-Host "  Used to detect cheat files hidden by attackers" -ForegroundColor Gray
     } else {
-        Write-Host "  Mods folder not found: $modsRoot" -ForegroundColor Gray
+        Write-Host "  Mods folder not found at: $modsRoot" -ForegroundColor Yellow
     }
 } catch {
-    Write-Host "  Error during hidden files detection: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Error checking for hidden files: $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# -- Collect verdict signals from Part 1 -----------------------
+# Collect verdict signals from Part 1
 # Defender off
-$rtpOff = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection" -Name DisableRealtimeMonitoring -ErrorAction SilentlyContinue).DisableRealtimeMonitoring
-$polOff = (Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" -Name DisableRealtimeMonitoring -ErrorAction SilentlyContinue).DisableRealtimeMonitoring
-if ($rtpOff -eq 1 -or $polOff -eq 1) { $verdictFlags.Add("Windows Defender real-time protection is OFF") }
+$defenderKey  = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
+$defenderPol  = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
+$rtpValue     = (Get-ItemProperty -Path $defenderKey  -Name "DisableRealtimeMonitoring" -ErrorAction SilentlyContinue).DisableRealtimeMonitoring
+$polValue     = (Get-ItemProperty -Path $defenderPol  -Name "DisableRealtimeMonitoring" -ErrorAction SilentlyContinue).DisableRealtimeMonitoring
+$rtpDisabled  = ($rtpValue -eq 1) -or ($polValue -eq 1)
+if ($rtpDisabled) { $verdictWarnings.Add("Windows Defender real-time protection disabled") }
+
+# Prefetch suspicious files
+if ($suspiciousFiles.Count -gt 0) { $verdictWarnings.Add("Suspicious prefetch files found ($($suspiciousFiles.Count))") }
+
+# Late JAR injection (reuse $suspiciousJars if in scope)
+if ($suspiciousJars -and $suspiciousJars.Count -gt 0) { $verdictFlags.Add("Late-loaded JARs detected ($($suspiciousJars.Count))") }
+
+# Event log cleared
+$logCleared = Get-WinEvent -FilterHashtable @{LogName="System"; Id=@(104,1102)} -MaxEvents 1 -ErrorAction SilentlyContinue
+if ($logCleared) { $verdictWarnings.Add("Event log was cleared recently") }
+
+Write-Host "`ndone." -ForegroundColor Cyan
+try {
+    $recycleBinPath = "$env:SystemDrive" + '\$Recycle.Bin'
+    Write-Host "`nRECYCLE BIN" -ForegroundColor Magenta
+
+    if (Test-Path $recycleBinPath) {
+        $recycleBinFolder = Get-Item -LiteralPath $recycleBinPath -Force
+        $userFolders      = Get-ChildItem -LiteralPath $recycleBinPath -Directory -Force -ErrorAction SilentlyContinue
+
+        if ($userFolders) {
+            $allDeletedItems = @()
+            $latestModTime   = $recycleBinFolder.LastWriteTime
+
+            foreach ($userFolder in $userFolders) {
+                if ($userFolder.LastWriteTime -gt $latestModTime) { $latestModTime = $userFolder.LastWriteTime }
+                $userItems = Get-ChildItem -LiteralPath $userFolder.FullName -File -Force -ErrorAction SilentlyContinue
+                if ($userItems) {
+                    $allDeletedItems += $userItems
+                    $latestFile = $userItems | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    if ($latestFile -and $latestFile.LastWriteTime -gt $latestModTime) { $latestModTime = $latestFile.LastWriteTime }
+                }
+            }
+
+            Write-Host "  Last Modified: " -NoNewline -ForegroundColor White
+            Write-Host $latestModTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Yellow
+
+            if ($allDeletedItems.Count -gt 0) {
+                Write-Host "  Total Items: "  -NoNewline -ForegroundColor White; Write-Host $allDeletedItems.Count -ForegroundColor Yellow
+                $latestItem = $allDeletedItems | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                Write-Host "  Latest Item: "  -NoNewline -ForegroundColor White; Write-Host $latestItem.Name -ForegroundColor Gray
+            } else {
+                Write-Host "  Status: " -NoNewline -ForegroundColor White; Write-Host "Folders present but empty" -ForegroundColor Magenta
+            }
+        } else {
+            Write-Host "  Status: "       -NoNewline -ForegroundColor White; Write-Host "Empty" -ForegroundColor Magenta
+            Write-Host "  Last Modified: " -NoNewline -ForegroundColor White; Write-Host $recycleBinFolder.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Magenta
+        }
+
+        $clearEvent = Get-WinEvent -FilterHashtable @{LogName="System"; Id=10006} -MaxEvents 1 -ErrorAction SilentlyContinue
+        if ($clearEvent) {
+            Write-Host "  Last Cleared (Event): " -NoNewline -ForegroundColor White
+            Write-Host $clearEvent.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Red
+        }
+    } else {
+        Write-Host "  Recycle Bin not found at: $recycleBinPath" -ForegroundColor Yellow
+        Write-Host "  Note: Recycle Bin may be empty or on different drive" -ForegroundColor Gray
+    }
+
+    $consoleHistoryPath = "$env:USERPROFILE\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadline\ConsoleHost_history.txt"
+    Write-Host "`n  CONSOLE HOST HISTORY" -ForegroundColor Magenta
+
+    if (Test-Path $consoleHistoryPath) {
+        $historyFile = Get-Item -Path $consoleHistoryPath -Force
+        Write-Host "    Last Modified: " -NoNewline -ForegroundColor White
+        Write-Host $historyFile.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss") -ForegroundColor Yellow
+        $attributes = $historyFile.Attributes
+        if ($attributes -ne "Archive") {
+            Write-Host "    Attributes: " -NoNewline -ForegroundColor White; Write-Host $attributes -ForegroundColor Yellow
+        } else {
+            Write-Host "    Attributes: Normal" -ForegroundColor Magenta
+        }
+        $fileSize = $historyFile.Length
+        Write-Host "    File Size: " -NoNewline -ForegroundColor White
+        Write-Host "$([math]::Round($fileSize/1024, 2)) KB" -ForegroundColor Yellow
+    } else {
+        Write-Host "    File not found: $consoleHistoryPath" -ForegroundColor Yellow
+        Write-Host "    Note: PowerShell history may be disabled or never used" -ForegroundColor Gray
+    }
+} catch {
+    Write-Host "  Error accessing system information: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# -- Logged-on users --------------------------------------------
+Write-Host "`nLOGGED-ON USERS" -ForegroundColor Magenta
+try {
+    $sessions = Get-CimInstance -ClassName Win32_LogonSession -ErrorAction SilentlyContinue |
+                Where-Object { $_.LogonType -in @(2, 10, 11) }  # Interactive, RemoteInteractive, CachedInteractive
+
+    if ($sessions) {
+        foreach ($session in $sessions) {
+            $assoc = Get-CimAssociatedInstance -InputObject $session -ResultClassName Win32_UserAccount -ErrorAction SilentlyContinue
+            if (-not $assoc) { $assoc = Get-CimAssociatedInstance -InputObject $session -ResultClassName Win32_UserAccount -ErrorAction SilentlyContinue }
+
+            $username = if ($assoc) { "$($assoc.Domain)\$($assoc.Name)" } else {
+                # fallback - grab from Win32_ComputerSystem
+                (Get-CimInstance Win32_ComputerSystem).UserName
+            }
+
+            $logonTypeMap = @{ 2="Interactive"; 10="RemoteInteractive"; 11="CachedInteractive" }
+            $logonType    = $logonTypeMap[[int]$session.LogonType]
+            $startTime    = if ($session.StartTime) { $session.StartTime.ToString("yyyy-MM-dd HH:mm:ss") } else { "N/A" }
+
+            Write-Host "  * " -NoNewline -ForegroundColor Magenta
+            Write-Host ("{0,-30}" -f $username) -NoNewline -ForegroundColor White
+            Write-Host (" Type: {0,-22} Since: {1}" -f $logonType, $startTime) -ForegroundColor Yellow
+        }
+    } else {
+        # simple fallback
+        $currentUser = (Get-CimInstance Win32_ComputerSystem).UserName
+        if ($currentUser) {
+            Write-Host "  * $currentUser" -ForegroundColor Magenta
+        } else {
+            Write-Host "  No active interactive sessions found" -ForegroundColor Magenta
+        }
+    }
+} catch {
+    Write-Host "  Error retrieving logged-on users: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Collect verdict signals from Part 1
+# Defender off
+$defenderKey  = "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
+$defenderPol  = "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection"
+$rtpValue     = (Get-ItemProperty -Path $defenderKey  -Name "DisableRealtimeMonitoring" -ErrorAction SilentlyContinue).DisableRealtimeMonitoring
+$polValue     = (Get-ItemProperty -Path $defenderPol  -Name "DisableRealtimeMonitoring" -ErrorAction SilentlyContinue).DisableRealtimeMonitoring
+$rtpDisabled  = ($rtpValue -eq 1) -or ($polValue -eq 1)
+if ($rtpDisabled) { $verdictWarnings.Add("Windows Defender real-time protection disabled") }
 
 # Prefetch suspicious files
 if ($suspiciousFiles.Count -gt 0) { $verdictWarnings.Add("Suspicious prefetch files found ($($suspiciousFiles.Count))") }
@@ -859,7 +1306,7 @@ Write-Host "`ndone." -ForegroundColor Cyan
 Write-Host ""
 Write-Host ("=" * 76) -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Press any key to continue to the Mod Analyzer..." -ForegroundColor Gray
+Write-Host "  Press any key to continue to Mod Analyzer..." -ForegroundColor Gray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 
 
@@ -1069,7 +1516,7 @@ $cheatStrings = @(
     "setBlockBreakingCooldown", "getBlockBreakingCooldown", "blockBreakingCooldown",
     "onBlockBreaking", "setItemUseCooldown",
     "setSelectedSlot", "invokeDoAttack", "invokeDoItemUse", "invokeOnMouseButton",
-    "onTickMovement", "onPushOutOfBlocks", "onIsGlowing",
+    "onTickMovement", "onIsGlowing", "onPushOutOfBlocks",
     "Automatically switches to sword when hitting with totem",
     "arrayOfString", "POT_CHEATS",
     "Dqrkis Client", "Entity.isGlowing"
@@ -1080,126 +1527,51 @@ function Invoke-BypassScan {
     param([string]$FilePath)
 
     $flags = [System.Collections.Generic.List[string]]::new()
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $jarName = [System.IO.Path]::GetFileName($FilePath)
 
-    $mavenPrefixes = @(
-        "com_","org_","net_","io_","dev_","gs_","xyz_",
-        "app_","me_","tv_","uk_","be_","fr_","de_"
-    )
-
-    function Test-SuspiciousJarName {
-        param([string]$JarName)
-        $base = [System.IO.Path]::GetFileNameWithoutExtension($JarName)
-        if ($base -match '\d') { return $false }
-        foreach ($pfx in $mavenPrefixes) { if ($base.ToLower().StartsWith($pfx)) { return $false } }
-        if ($base.Length -gt 20) { return $false }
-        return $true
+    # Basic file checks
+    if (-not (Test-Path $FilePath)) {
+        $flags.Add("File not accessible: $FilePath")
+        return $flags
     }
 
-    try {
-        $zip = [System.IO.Compression.ZipFile]::OpenRead($FilePath)
+    # Check for suspicious JAR name patterns
+    if (-not (Test-SuspiciousJarName -JarName $jarName)) {
+        $flags.Add("Suspicious JAR name: $jarName")
+    }
 
-        $nestedJars   = @($zip.Entries | Where-Object { $_.FullName -match "^META-INF/jars/.+\.jar$" })
-        $outerClasses = @($zip.Entries | Where-Object { $_.FullName -match "\.class$" })
+    # Check file size (suspicious if > 50MB)
+    $fileSize = (Get-Item $FilePath).Length / 1MB
+    if ($fileSize -gt 50) {
+        $flags.Add("Large file size: $([math]::Round($fileSize, 2)) MB")
+    }
 
-        $suspiciousNestedJars = @()
-        foreach ($nj in $nestedJars) {
-            $njBase = [System.IO.Path]::GetFileName($nj.FullName)
-            if (Test-SuspiciousJarName -JarName $njBase) { $suspiciousNestedJars += $njBase }
-        }
-        foreach ($sj in $suspiciousNestedJars) {
-            $flags.Add("Suspicious nested JAR - no version number, not a known dependency: $sj")
-        }
+    # Check for nested JARs
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($FilePath)
+    $nestedJars = $zip.Entries | Where-Object { $_.FullName -match "^META-INF/jars/.+\.jar$" }
+    if ($nestedJars.Count -gt 0) {
+        $flags.Add("Contains nested JARs ($($nestedJars.Count) found)")
+    }
+    $zip.Dispose()
 
-        if ($nestedJars.Count -eq 1 -and $outerClasses.Count -lt 3) {
-            $njName = [System.IO.Path]::GetFileName(($nestedJars | Select-Object -First 1).FullName)
-            $flags.Add("Hollow shell - outer JAR has only $($outerClasses.Count) own class(es) but wraps: $njName")
-        }
+    # Check for unsigned JARs (no signature)
+    $signature = Get-AuthenticodeSignature $FilePath -ErrorAction SilentlyContinue
+    if (-not $signature) {
+        $flags.Add("Unsigned JAR file")
+    }
 
-        $outerModId = ""
-        $fmje = $zip.Entries | Where-Object { $_.FullName -eq "fabric.mod.json" } | Select-Object -First 1
-        if ($fmje) {
-            try {
-                $s = $fmje.Open(); $r = New-Object System.IO.StreamReader($s)
-                $t = $r.ReadToEnd(); $r.Close(); $s.Close()
-                if ($t -match '"id"\s*:\s*"([^"]+)"') { $outerModId = $matches[1] }
-            } catch { }
-        }
+    # Hash lookup against known cheat databases
+    $sha1Hash = Get-FileSHA1 -Path $FilePath
+    $modrinthInfo = Query-Modrinth -Hash $sha1Hash
+    $megabaseInfo = Query-Megabase -Hash $sha1Hash
 
-        $allEntries = [System.Collections.Generic.List[object]]::new()
-        foreach ($e in $zip.Entries) { $allEntries.Add($e) }
+    if ($modrinthInfo.Name) {
+        $flags.Add("Modrinth match: $($modrinthInfo.Name) (slug: $($modrinthInfo.Slug))")
+    }
 
-        $innerZips = [System.Collections.Generic.List[object]]::new()
-        foreach ($nj in $nestedJars) {
-            try {
-                $ns = $nj.Open(); $ms = New-Object System.IO.MemoryStream
-                $ns.CopyTo($ms); $ns.Close(); $ms.Position = 0
-                $iz = [System.IO.Compression.ZipArchive]::new($ms, [System.IO.Compression.ZipArchiveMode]::Read)
-                $innerZips.Add($iz)
-                foreach ($ie in $iz.Entries) { $allEntries.Add($ie) }
-            } catch { }
-        }
-
-        $runtimeExecFound  = $false
-        $httpDownloadFound = $false
-        $httpExfilFound    = $false
-        $obfuscatedCount   = 0
-        $totalClassCount   = 0
-
-        foreach ($entry in $allEntries) {
-            $name = $entry.FullName
-            if ($name -match "\.class$") {
-                $totalClassCount++
-                $segs = ($name -replace "\.class$","") -split "/"
-                $consecutiveSingle = 0; $maxConsecutive = 0
-                foreach ($seg in $segs) {
-                    if ($seg.Length -eq 1) { $consecutiveSingle++; if ($consecutiveSingle -gt $maxConsecutive) { $maxConsecutive = $consecutiveSingle } }
-                    else { $consecutiveSingle = 0 }
-                }
-                if ($maxConsecutive -ge 3) { $obfuscatedCount++ }
-
-                try {
-                    $st = $entry.Open(); $ms2 = New-Object System.IO.MemoryStream
-                    $st.CopyTo($ms2); $st.Close()
-                    $rawBytes = $ms2.ToArray(); $ms2.Dispose()
-                    $ct = [System.Text.Encoding]::ASCII.GetString($rawBytes)
-
-                    if ($ct -match "java/lang/Runtime" -and $ct -match "getRuntime" -and $ct -match "exec") { $runtimeExecFound = $true }
-                    if ($ct -match "openConnection" -and $ct -match "HttpURLConnection" -and $ct -match "FileOutputStream") { $httpDownloadFound = $true }
-                    if ($ct -match "openConnection" -and $ct -match "setDoOutput" -and $ct -match "getOutputStream" -and $ct -match "getProperty") { $httpExfilFound = $true }
-                } catch { }
-            }
-        }
-
-        foreach ($iz in $innerZips) { try { $iz.Dispose() } catch { } }
-        $zip.Dispose()
-
-        $obfPct = if ($totalClassCount -ge 10) { [math]::Round(($obfuscatedCount / $totalClassCount) * 100) } else { 0 }
-
-        if ($runtimeExecFound -and $obfPct -ge 40) {
-            $flags.Add("Runtime.exec() inside obfuscated code - mod can execute arbitrary OS commands (combined with heavy obfuscation this is a strong malice indicator)")
-        }
-        if ($httpDownloadFound) {
-            $flags.Add("HTTP file download - mod fetches and writes files from a remote server at runtime (no legitimate Fabric mod does this)")
-        }
-        if ($httpExfilFound) {
-            $flags.Add("HTTP POST exfiltration - mod reads system properties and sends data to an external server (possible token/session theft)")
-        }
-        if ($totalClassCount -ge 10 -and $obfPct -ge 40) {
-            $flags.Add("Heavy obfuscation - $obfPct% of classes have 3+ consecutive single-letter path segments (a/b/c style). Legitimate mods never do this.")
-        }
-
-        $knownLegitModIds = @(
-            "vmp-fabric","vmp","lithium","sodium","iris","fabric-api",
-            "modmenu","ferrite-core","lazydfu","starlight","entityculling",
-            "memoryleakfix","krypton","c2me-fabric","smoothboot-fabric",
-            "immediatelyfast","noisium","threadtweak"
-        )
-        $dangerCount = ($flags | Where-Object { $_ -match "Runtime\.exec|HTTP file download|HTTP POST|Heavy obfuscation|Suspicious nested JAR" }).Count
-        if ($outerModId -and ($knownLegitModIds -contains $outerModId) -and $dangerCount -gt 0) {
-            $flags.Add("Fake mod identity - outer JAR claims to be '$outerModId' but dangerous code was found inside (trojanized build)")
-        }
-    } catch { }
+    if ($megabaseInfo) {
+        $flags.Add("Megabase match: $($megabaseInfo.name)")
+    }
 
     return $flags
 }
@@ -1208,780 +1580,219 @@ function Invoke-BypassScan {
 function Invoke-ModScan {
     param([string]$FilePath)
 
-    $foundPatterns = [System.Collections.Generic.HashSet[string]]::new()
-    $foundStrings  = [System.Collections.Generic.HashSet[string]]::new()
+    $jarName = [System.IO.Path]::GetFileName($FilePath)
+    $scanResults = [System.Collections.Generic.List[object]]::new()
+
     Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-    try {
-        $patternRegex = [regex]::new(
-            '(?<![A-Za-z])(' + ($suspiciousPatterns -join '|') + ')(?![A-Za-z])',
-            [System.Text.RegularExpressions.RegexOptions]::Compiled
-        )
-        $archive = [System.IO.Compression.ZipFile]::OpenRead($FilePath)
-        foreach ($entry in $archive.Entries) {
-            foreach ($m in $patternRegex.Matches($entry.FullName)) { [void]$foundPatterns.Add($m.Value) }
-            if ($entry.FullName -match '\.(class|json)$' -or $entry.FullName -match 'MANIFEST\.MF') {
-                try {
-                    $stream  = $entry.Open(); $reader = New-Object System.IO.StreamReader($stream)
-                    $content = $reader.ReadToEnd(); $reader.Close(); $stream.Close()
-                    foreach ($m in $patternRegex.Matches($content)) { [void]$foundPatterns.Add($m.Value) }
-                } catch { }
-            }
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($FilePath)
+
+    # Scan for suspicious patterns in file names and paths
+    foreach ($pattern in $suspiciousPatterns) {
+        if ($jarName -like "*$pattern*" -or $FilePath -like "*$pattern*") {
+            $scanResults.Add([PSCustomObject]@{
+                Type = "Pattern Match"
+                Pattern = $pattern
+                Location = "Filename/Path"
+                Details = "Found in name or path"
+            })
         }
-        $archive.Dispose()
-    } catch { }
+    }
 
-    try {
-        $stringsExe = @(
-            "C:\Program Files\Git\usr\bin\strings.exe",
-            "C:\Program Files\Git\mingw64\bin\strings.exe",
-            "$env:ProgramFiles\Git\usr\bin\strings.exe",
-            "C:\msys64\usr\bin\strings.exe",
-            "C:\cygwin64\bin\strings.exe"
-        ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    # Scan all entries for suspicious strings
+    $allEntries = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in $zip.Entries) { $allEntries.Add($entry) }
 
-        if ($stringsExe) {
-            $tmp = Join-Path $env:TEMP "void_str_$(Get-Random).txt"
-            & $stringsExe $FilePath 2>$null | Out-File $tmp -Encoding UTF8
-            if (Test-Path $tmp) {
-                $raw = Get-Content $tmp -Raw
-                Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-                foreach ($s in $cheatStrings) {
-                    if ($s -eq "velocity") {
-                        if ($raw -match "velocity(?:hack|module|cheat|bypass|packet|horizontal|vertical|amount|factor|setting)") { [void]$foundStrings.Add($s) }
-                    } elseif ($raw -match [regex]::Escape($s)) { [void]$foundStrings.Add($s) }
+    $totalEntries = $allEntries.Count
+    $processedEntries = 0
+
+    foreach ($entry in $allEntries) {
+        $processedEntries++
+        AV-Show-Progress -Current $processedEntries -Total $totalEntries -Activity "Scanning $jarName" -Status "Analyzing entries"
+
+        try {
+            $s = $entry.Open()
+            $reader = [System.IO.StreamReader]::new($s)
+            $content = $reader.ReadToEnd()
+            $reader.Close()
+            $s.Close()
+
+            $foundPatterns = [System.Collections.Generic.HashSet[string]]::new()
+
+            foreach ($cheat in $cheatStrings) {
+                if ($content -like "*$cheat*" -or $content -cmatch $cheat) {
+                    $foundPatterns.Add($cheat)
                 }
             }
-        } else {
-            $rawText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($FilePath))
-            foreach ($s in $cheatStrings) {
-                if ($s -eq "velocity") {
-                    if ($rawText -match "velocity(?:hack|module|cheat|bypass|packet|horizontal|vertical|amount|factor|setting)") { [void]$foundStrings.Add($s) }
-                } elseif ($rawText -match [regex]::Escape($s)) { [void]$foundStrings.Add($s) }
-            }
-            try {
-                $zip = [System.IO.Compression.ZipFile]::OpenRead($FilePath)
-                foreach ($entry in ($zip.Entries | Where-Object { $_.Name -like "*.class" })) {
-                    try {
-                        $stream = $entry.Open(); $reader = New-Object System.IO.StreamReader($stream)
-                        $classText = $reader.ReadToEnd(); $reader.Close(); $stream.Close()
-                        foreach ($s in $cheatStrings) {
-                            if ($s -eq "velocity") {
-                                if ($classText -match "velocity(?:hack|module|cheat|bypass|packet|horizontal|vertical|amount|factor|setting)") { [void]$foundStrings.Add($s) }
-                            } elseif ($classText -match [regex]::Escape($s)) { [void]$foundStrings.Add($s) }
-                        }
-                    } catch { }
-                }
-                $zip.Dispose()
-            } catch { }
-        }
-    } catch { }
 
-    return @{ Patterns = $foundPatterns; Strings = $foundStrings }
+            if ($foundPatterns.Count -gt 0) {
+                $scanResults.Add([PSCustomObject]@{
+                    Type = "String Match"
+                    Pattern = ($foundPatterns -join ", ")
+                    Location = $entry.FullName
+                    Details = "Found in class content"
+                })
+            }
+        } catch {
+            $scanResults.Add([PSCustomObject]@{
+                Type = "Scan Error"
+                Pattern = "N/A"
+                Location = $entry.FullName
+                Details = "Error reading entry: $($_.Exception.Message)"
+            })
+        }
+    }
+
+    $zip.Dispose()
+    Write-Host "" -NoNewline
+    return $scanResults
 }
 
 # -- Scan passes -----------------------------------------------
-$verifiedMods   = @()
-$unknownMods    = @()
-$suspiciousMods = @()
-$bypassMods     = @()
-
-try {
-    $jarFiles = Get-ChildItem -Path $modsPath -Filter *.jar -ErrorAction Stop
-} catch {
-    Write-Host "Error accessing directory: $_" -ForegroundColor Red
-    Write-Host "Press any key to exit..." -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
-}
-
-if ($jarFiles.Count -eq 0) {
-    Write-Host "No JAR files found in: $modsPath" -ForegroundColor Yellow
-    Write-Host "Press any key to exit..." -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 0
-}
-
-$fileWord      = if ($jarFiles.Count -eq 1) { "file" } else { "files" }
-Write-Host "Found $($jarFiles.Count) JAR $fileWord to analyze" -ForegroundColor Magenta
-Write-Host
-
-$spinnerFrames = @("","|","/","-","\")
-$totalFiles    = $jarFiles.Count
-$idx           = 0
-
 # Pass 1 - hash lookup
-Write-Host "Verifying mod hashes against Modrinth/Megabase databases..." -ForegroundColor Magenta
-Write-Host ""
-foreach ($jar in $jarFiles) {
-    $idx++
-    AV-Show-Progress -Current $idx -Total $totalFiles -Activity "Hash Verification" -Status "Checking $($jar.Name)"
-
-    $hash = Get-FileSHA1 -Path $jar.FullName
-    if ($hash) {
-        $modrinthData = Query-Modrinth -Hash $hash
-        if ($modrinthData.Slug) { $verifiedMods += [PSCustomObject]@{ ModName = $modrinthData.Name; FileName = $jar.Name; FilePath = $jar.FullName }; continue }
-        $megabaseData = Query-Megabase -Hash $hash
-        if ($megabaseData.name) { $verifiedMods += [PSCustomObject]@{ ModName = $megabaseData.Name; FileName = $jar.Name; FilePath = $jar.FullName }; continue }
-    }
-
-    $src = Get-DownloadSource $jar.FullName
-    $unknownMods += [PSCustomObject]@{ FileName = $jar.Name; FilePath = $jar.FullName; DownloadSource = $src }
-}
-
-Write-Host ""
+Write-Host "`n[HASH LOOKUP]" -ForegroundColor Cyan
+$hashLookupResults = [System.Collections.Generic.List[object]]::new()
 
 # Pass 2 - deep scan
-$modWord = if ($totalFiles -eq 1) { "mod" } else { "mods" }
-Write-Host "Deep-scanning for suspicious patterns and strings..." -ForegroundColor Magenta
-Write-Host ""
-$idx = 0
-
-foreach ($jar in $jarFiles) {
-    $idx++
-    AV-Show-Progress -Current $idx -Total $totalFiles -Activity "Pattern Scan" -Status "Analyzing $($jar.Name)"
-
-    $result = Invoke-ModScan -FilePath $jar.FullName
-    if ($result.Patterns.Count -gt 0 -or $result.Strings.Count -gt 0) {
-        $suspiciousMods += [PSCustomObject]@{ FileName = $jar.Name; Patterns = $result.Patterns; Strings = $result.Strings }
-        $verifiedMods    = $verifiedMods | Where-Object { $_.FileName -ne $jar.Name }
-    }
-}
-
-Write-Host ""
+Write-Host "`n[DEEP SCAN]" -ForegroundColor Cyan
+$deepScanResults = [System.Collections.Generic.List[object]]::new()
 
 # Pass 3 - bypass scan
-Write-Host "Running bypass/injection analysis..." -ForegroundColor Gray
-Write-Host ""
-$idx = 0
-
-foreach ($jar in $jarFiles) {
-    $idx++
-    AV-Show-Progress -Current $idx -Total $totalFiles -Activity "Bypass Analysis" -Status "Scanning $($jar.Name)"
-
-    $bypassFlags = Invoke-BypassScan -FilePath $jar.FullName
-    if ($bypassFlags.Count -gt 0) {
-        $bypassMods  += [PSCustomObject]@{ FileName = $jar.Name; Flags = $bypassFlags }
-        $verifiedMods = $verifiedMods | Where-Object { $_.FileName -ne $jar.Name }
-        $unknownMods  = $unknownMods  | Where-Object { $_.FileName -ne $jar.Name }
-    }
-}
-
-Write-Host "`r$(' ' * 100)`r" -NoNewline
+Write-Host "`n[BYPASS SCAN]" -ForegroundColor Cyan
+$bypassScanResults = [System.Collections.Generic.List[object]]::new()
 
 # -- Results --------------------------------------------------
-Write-Host "`n" + ("=" * 76) -ForegroundColor Gray
+Write-Host "`n[SCAN RESULTS]" -ForegroundColor Cyan
+Write-Host "=" * 76 -ForegroundColor Gray
 
-if ($verifiedMods.Count -gt 0) {
-    Write-Host "VERIFIED MODS ($($verifiedMods.Count))" -ForegroundColor Magenta
-    Write-Host ("-" * 76) -ForegroundColor Gray
-    foreach ($mod in $verifiedMods) {
-        Write-Host "  v " -ForegroundColor Magenta -NoNewline
-        Write-Host "$($mod.ModName)" -ForegroundColor White -NoNewline
-        Write-Host " -> " -ForegroundColor Gray -NoNewline
-        Write-Host "$($mod.FileName)" -ForegroundColor Gray
+$allMods = Get-ChildItem -Path $modsPath -Filter *.jar -File -Force -ErrorAction SilentlyContinue
+$totalMods = $allMods.Count
+$processedMods = 0
+
+if ($totalMods -eq 0) {
+    Write-Host "No JAR files found in $modsPath" -ForegroundColor Yellow
+} else {
+    foreach ($mod in $allMods) {
+        $processedMods++
+        AV-Show-Progress -Current $processedMods -Total $totalMods -Activity "Scanning mods" -Status "Processing $($mod.Name)"
+
+        $modResults = [System.Collections.Generic.List[object]]::new()
+
+        # Hash lookup
+        $hashFlags = Invoke-BypassScan -FilePath $mod.FullName
+        $modResults.AddRange($hashFlags)
+
+        # Deep scan
+        $deepFlags = Invoke-ModScan -FilePath $mod.FullName
+        $modResults.AddRange($deepFlags)
+
+        # Bypass scan
+        $bypassFlags = Invoke-BypassScan -FilePath $mod.FullName
+        $modResults.AddRange($bypassFlags)
+
+        if ($modResults.Count -gt 0) {
+            $hashLookupResults.AddRange([PSCustomObject]@{
+                ModName = $mod.Name
+                Size = [math]::Round(($mod.Length / 1MB), 2)
+                Flags = $modResults
+                Risk = "High"
+            })
+            $deepScanResults.AddRange([PSCustomObject]@{
+                ModName = $mod.Name
+                Size = [math]::Round(($mod.Length / 1MB), 2)
+                Flags = $modResults
+                Risk = "Critical"
+            })
+            $bypassScanResults.AddRange([PSCustomObject]@{
+                ModName = $mod.Name
+                Size = [math]::Round(($mod.Length / 1MB), 2)
+                Flags = $modResults
+                Risk = "Critical"
+            })
+        }
     }
-    Write-Host ""
-}
 
-if ($unknownMods.Count -gt 0) {
-    Write-Host "UNKNOWN MODS ($($unknownMods.Count))" -ForegroundColor Yellow
-    Write-Host ("-" * 76) -ForegroundColor Gray
-    foreach ($mod in $unknownMods) {
-        $name = $mod.FileName
-        if ($name.Length -gt 50) { $name = $name.Substring(0,47) + "..." }
-        $topLine    = "  +- ? " + $name + " " + ("-" * (65 - $name.Length)) + "+"
-        $sourceText = if ($mod.DownloadSource) { "Source: $($mod.DownloadSource)" } else { "Source: ?" }
-        $bottomLine = "  +- " + $sourceText + " " + ("-" * (67 - $sourceText.Length)) + "+"
-        Write-Host $topLine    -ForegroundColor Yellow
-        Write-Host $bottomLine -ForegroundColor Yellow
-        Write-Host ""
-    }
-}
+    Write-Host "" -NoNewline
 
-if ($suspiciousMods.Count -gt 0) {
-    Write-Host "SUSPICIOUS MODS ($($suspiciousMods.Count))" -ForegroundColor Red
-    Write-Host ("-" * 76) -ForegroundColor Gray
-    Write-Host ""
-    foreach ($mod in $suspiciousMods) {
-        Write-Host "  +--- " -ForegroundColor Red -NoNewline
-        Write-Host "FLAGGED" -ForegroundColor White -BackgroundColor DarkRed -NoNewline
-        Write-Host " -----------------------------------------------------" -ForegroundColor Red
-        Write-Host "  |" -ForegroundColor Red
-        Write-Host "  |  File: " -ForegroundColor Red -NoNewline
-        Write-Host "$($mod.FileName)" -ForegroundColor Yellow
-        if ($mod.Patterns.Count -gt 0) {
-            Write-Host "  |" -ForegroundColor Red
-            Write-Host "  |  Detected Patterns:" -ForegroundColor Red
-            foreach ($p in ($mod.Patterns | Sort-Object)) {
-                Write-Host "  |    * " -ForegroundColor Red -NoNewline; Write-Host "$p" -ForegroundColor White
+    # Display results
+    Write-Host "HASH LOOKUP RESULTS:" -ForegroundColor Yellow
+    if ($hashLookupResults.Count -gt 0) {
+        foreach ($result in $hashLookupResults) {
+            Write-Host "  +--- " -ForegroundColor Red -NoNewline
+            Write-Host " | MOD: $($result.ModName) ($([math]::Round($result.Size, 2)) MB)" -ForegroundColor Red
+            foreach ($flag in $result.Flags) {
+                Write-Host " | FLAG: $flag" -ForegroundColor Red
             }
+            Write-Host " | RISK: $($result.Risk)" -ForegroundColor Red
+            Write-Host " +--- " -ForegroundColor Red
         }
-        $uniqueStrings = $mod.Strings | Where-Object { $mod.Patterns -notcontains $_ } | Sort-Object
-        if ($uniqueStrings.Count -gt 0) {
-            Write-Host "  |" -ForegroundColor Red
-            Write-Host "  |  Detected Strings:" -ForegroundColor DarkRed
-            foreach ($s in $uniqueStrings) {
-                Write-Host "  |    * " -ForegroundColor DarkRed -NoNewline; Write-Host "$s" -ForegroundColor DarkRed
+    } else {
+        Write-Host "  No suspicious hashes found" -ForegroundColor Green
+    }
+
+    Write-Host "`nDEEP SCAN RESULTS:" -ForegroundColor Yellow
+    if ($deepScanResults.Count -gt 0) {
+        foreach ($result in $deepScanResults) {
+            Write-Host "  +--- " -ForegroundColor Red -NoNewline
+            Write-Host " | MOD: $($result.ModName) ($([math]::Round($result.Size, 2)) MB)" -ForegroundColor Red
+            foreach ($flag in $result.Flags) {
+                Write-Host " | FLAG: $flag" -ForegroundColor Red
             }
+            Write-Host " | RISK: $($result.Risk)" -ForegroundColor Red
+            Write-Host " +--- " -ForegroundColor Red
         }
-        Write-Host "  |" -ForegroundColor Red
-        Write-Host "  +-----------------------------------------------------------" -ForegroundColor Red
-        Write-Host ""
+    } else {
+        Write-Host "  No suspicious patterns found" -ForegroundColor Green
     }
-}
 
-if ($bypassMods.Count -gt 0) {
-    Write-Host "BYPASS / INJECTION DETECTED ($($bypassMods.Count))" -ForegroundColor Magenta
-    Write-Host ("-" * 76) -ForegroundColor Gray
-    Write-Host ""
-    foreach ($mod in $bypassMods) {
-        Write-Host "  +--- " -ForegroundColor Magenta -NoNewline
-        Write-Host "INJECTION" -ForegroundColor White -BackgroundColor DarkMagenta -NoNewline
-        Write-Host " ---------------------------------------------------" -ForegroundColor Magenta
-        Write-Host "  |" -ForegroundColor Magenta
-        Write-Host "  |  File: " -ForegroundColor Magenta -NoNewline
-        Write-Host "$($mod.FileName)" -ForegroundColor Yellow
-        Write-Host "  |" -ForegroundColor Magenta
-        Write-Host "  |  Bypass Flags:" -ForegroundColor Magenta
-        foreach ($flag in $mod.Flags) {
-            Write-Host "  |    ! " -ForegroundColor Magenta -NoNewline; Write-Host "$flag" -ForegroundColor White
+    Write-Host "`nBYPASS SCAN RESULTS:" -ForegroundColor Yellow
+    if ($bypassScanResults.Count -gt 0) {
+        foreach ($result in $bypassScanResults) {
+            Write-Host "  +--- " -ForegroundColor Red -NoNewline
+            Write-Host " | MOD: $($result.ModName) ($([math]::Round($result.Size, 2)) MB)" -ForegroundColor Red
+            foreach ($flag in $result.Flags) {
+                Write-Host " | FLAG: $flag" -ForegroundColor Red
+            }
+            Write-Host " | RISK: $($result.Risk)" -ForegroundColor Red
+            Write-Host " +--- " -ForegroundColor Red
         }
-        Write-Host "  |" -ForegroundColor Magenta
-        Write-Host "  +---------------------------------------------------------" -ForegroundColor Magenta
-        Write-Host ""
+    } else {
+        Write-Host "  No bypass techniques found" -ForegroundColor Green
     }
-}
 
-Write-Host "SUMMARY" -ForegroundColor Magenta
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host "  Total files scanned: " -ForegroundColor Gray -NoNewline; Write-Host "$totalFiles"              -ForegroundColor White
-Write-Host "  Verified mods:       " -ForegroundColor Gray -NoNewline; Write-Host "$($verifiedMods.Count)"   -ForegroundColor Green
-Write-Host "  Unknown mods:        " -ForegroundColor Gray -NoNewline; Write-Host "$($unknownMods.Count)"    -ForegroundColor Yellow
-Write-Host "  Suspicious mods:     " -ForegroundColor Gray -NoNewline; Write-Host "$($suspiciousMods.Count)" -ForegroundColor Red
-Write-Host "  Bypass/Injected:     " -ForegroundColor Gray -NoNewline; Write-Host "$($bypassMods.Count)"     -ForegroundColor Magenta
-Write-Host
-Write-Host ("=" * 76) -ForegroundColor Gray
+    Write-Host "=" * 76 -ForegroundColor Gray
+}
 
 # -- Collect Part 2 verdict signals ----------------------------
-if ($suspiciousMods.Count -gt 0) { $verdictFlags.Add("Suspicious mods detected ($($suspiciousMods.Count))") }
-if ($bypassMods.Count -gt 0)     { $verdictFlags.Add("Bypass/injected mods detected ($($bypassMods.Count))") }
-if ($unknownMods.Count -gt 0)    { $verdictWarnings.Add("Unknown mods not on Modrinth/Megabase ($($unknownMods.Count))") }
+$totalSuspicious = ($hashLookupResults + $deepScanResults + $bypassScanResults).Count
+if ($totalSuspicious -gt 0) {
+    $verdictFlags.Add("Suspicious mods detected: $totalSuspicious")
+}
 
 # -- FINAL VERDICT ---------------------------------------------
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host "  FINAL VERDICT" -ForegroundColor Cyan
-Write-Host ("=" * 76) -ForegroundColor Gray
+Write-Host "`n" -ForegroundColor Cyan
+Write-Host "=" * 76 -ForegroundColor Gray
+Write-Host "" -ForegroundColor Cyan
+Write-Host "FINAL VERDICT" -ForegroundColor Red -NoNewline
+Write-Host "=" * 76 -ForegroundColor Gray
 
-if ($verdictFlags.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  * FLAGGED *" -ForegroundColor White -BackgroundColor DarkRed
-    Write-Host ""
-    Write-Host "  Hard flags:" -ForegroundColor Red
-    foreach ($f in $verdictFlags) {
-        Write-Host "    * $f" -ForegroundColor Red
+$allIssues = $verdictFlags + $verdictWarnings
+if ($allIssues.Count -eq 0) {
+    Write-Host "✓ SYSTEM APPEARS CLEAN" -ForegroundColor Green
+} else {
+    Write-Host "⚠ ISSUES DETECTED:" -ForegroundColor Yellow
+
+    if ($verdictFlags.Count -gt 0) {
+        Write-Host "  CRITICAL FLAGS:" -ForegroundColor Red
+        foreach ($flag in $verdictFlags) { Write-Host "    • $flag" -ForegroundColor Red }
     }
+
     if ($verdictWarnings.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  Also worth reviewing:" -ForegroundColor Yellow
-        foreach ($w in $verdictWarnings) {
-            Write-Host "    * $w" -ForegroundColor Yellow
-        }
+        Write-Host "  WARNINGS:" -ForegroundColor Yellow
+        foreach ($warning in $verdictWarnings) { Write-Host "    • $warning" -ForegroundColor Yellow }
     }
-    Write-Host ""
-    Write-Host "  Note: Some flags can false flag legitimate software - manual verification recommended" -ForegroundColor Gray
-    Write-Host "  for highly suspicious items before taking any action" -ForegroundColor Gray
-} elseif ($verdictWarnings.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  * REVIEW *" -ForegroundColor White -BackgroundColor DarkYellow
-    Write-Host ""
-    Write-Host "  Nothing confirmed but worth checking:" -ForegroundColor Yellow
-    foreach ($w in $verdictWarnings) {
-        Write-Host "    * $w" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host ""
-    Write-Host "  * CLEAN *" -ForegroundColor White -BackgroundColor DarkGreen
-    Write-Host ""
-    Write-Host "  No flags or warnings raised across both tools" -ForegroundColor Green
 }
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-Write-Host "  Analysis complete! " -ForegroundColor Magenta
-Write-Host ""
-Write-Host "  Created by: "  -ForegroundColor White    -NoNewline
-Write-Host "AcousticVoid"    -ForegroundColor Magenta
-Write-Host "  My Socials: "  -ForegroundColor White    -NoNewline
-Write-Host "Discord  : "     -ForegroundColor Magenta  -NoNewline
-Write-Host "piespeas"        -ForegroundColor Magenta
-Write-Host "                 " -NoNewline
-Write-Host "GitHub   : "     -ForegroundColor Gray -NoNewline
-Write-Host "https://piespeas.github.io/" -ForegroundColor White
-Write-Host "                 " -NoNewline
-Write-Host "YouTube  : "     -ForegroundColor Magenta -NoNewline
-Write-Host "AcousticVoid"    -ForegroundColor Magenta
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-Write-Host "Analysis complete. Results displayed above." -ForegroundColor Green
 
-
-# ============================================================
-#  TRANSITION TO PART 3
-# ============================================================
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-Write-Host "  Press any key to continue to the Command History Analyzer..." -ForegroundColor Gray
+Write-Host "" -ForegroundColor Cyan
+Write-Host "Scan completed. Press any key to exit..." -ForegroundColor Gray
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-
-
-# ============================================================
-#  PART 3 - COMMAND HISTORY ANALYZER
-# ============================================================
-
-$Banner = @"
-Checking command history since Minecraft launch...
-"@
-
-Write-Host $Banner -ForegroundColor Cyan
-Write-Host ""
-Write-Host "                love yall " -ForegroundColor Gray -NoNewline
-Write-Host "<3 "           -ForegroundColor Magenta -NoNewline
-Write-Host "by "           -ForegroundColor Gray -NoNewline
-Write-Host "AcousticVoid"  -ForegroundColor Magenta
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-
-# -- Get Minecraft start time ----------------------------------
-$mcProc = Get-Process javaw -ErrorAction SilentlyContinue
-if (-not $mcProc) { $mcProc = Get-Process java -ErrorAction SilentlyContinue }
-
-if (-not $mcProc) {
-    Write-Host "  Minecraft is not running - cannot analyze commands since launch" -ForegroundColor Yellow
-    Write-Host "  Showing recent command history instead..." -ForegroundColor Gray
-    $mcStartTime = (Get-Date).AddHours(-2)  # Fallback: show last 2 hours
-} else {
-    $mcStartTime = $mcProc.StartTime
-    Write-Host ("  Minecraft started: {0}" -f $mcStartTime.ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor White
-    Write-Host "  Analyzing commands executed since this time..." -ForegroundColor Gray
-    Write-Host ""
-}
-
-# -- Suspicious command patterns --------------------------------
-$suspiciousCommands = @(
-    # File/download operations
-    "powershell -enc", "cmd /c", "certutil -decode", "certutil -urlcache",
-    "bitsadmin /transfer", "Invoke-WebRequest", "curl -o", "wget -O",
-    "rundll32.exe", "regsvr32.exe", "mshta.exe", "wscript.exe", "cscript.exe",
-    
-    # Process/memory operations
-    "taskkill /f", "taskkill /im", "Stop-Process -Force", "Get-Process",
-    "Inject", "LoadLibrary", "VirtualAlloc", "WriteProcessMemory",
-    
-    # Network operations
-    "netsh", "net use", "net user", "net localgroup", "net share",
-    "Port forwarding", "proxy", "tunnel", "socks",
-    
-    # Registry operations
-    "reg add", "reg delete", "reg query", "Set-ItemProperty",
-    "Remove-ItemProperty", "New-ItemProperty",
-    
-    # System manipulation
-    "bcdedit", "wmic", "wevtutil", "cipher", "sfc", "chkdsk",
-    
-    # Cheat-related commands
-    "cheat", "hack", "inject", "bypass", "crack", "patch",
-    "mod menu", "trainer", "esp", "aimbot", "wallhack",
-    
-    # File hiding/encryption
-    "attrib +h", "attrib +s", "cipher /e", "cipher /d",
-    "hidden", "invisible", "stealth",
-    
-    # Suspicious PowerShell patterns
-    "IEX", "Invoke-Expression", "Start-BitsTransfer",
-    "DownloadString", "DownloadFile", "FromBase64String"
-)
-
-# -- PowerShell History Analysis -------------------------------
-Write-Host "POWERSHELL HISTORY ANALYSIS" -ForegroundColor Cyan
-Write-Host ""
-
-$psHistoryPath = "$env:USERPROFILE\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadline\ConsoleHost_history.txt"
-$psCommandsFound = 0
-$suspiciousPsCommands = @()
-
-if (Test-Path $psHistoryPath) {
-    try {
-        $psHistory = Get-Content $psHistoryPath -ErrorAction SilentlyContinue
-        Write-Host "  PowerShell history file found: $psHistoryPath" -ForegroundColor White
-        Write-Host ("  Total entries: {0}" -f $psHistory.Count) -ForegroundColor White
-        Write-Host ""
-        
-        foreach ($line in $psHistory) {
-            if ($line.Trim() -eq "") { continue }
-            
-            # Try to extract timestamp if available (PowerShell 7+ includes timestamps)
-            $timestamp = $null
-            $command = $line
-            
-            if ($line -match '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}') {
-                $timestamp = [datetime]::Parse($line.Substring(0, 19))
-                $command = $line.Substring(20).Trim()
-            }
-            
-            # Check if command was executed after Minecraft started
-            $commandTime = if ($timestamp) { $timestamp } else { $mcStartTime.AddMinutes(-1) }
-            
-            if ($commandTime -ge $mcStartTime) {
-                $psCommandsFound++
-                
-                # Check for suspicious patterns
-                $isSuspicious = $false
-                $suspiciousPattern = $null
-                
-                foreach ($pattern in $suspiciousCommands) {
-                    if ($command -like "*$pattern*" -or $command -match [regex]::Escape($pattern)) {
-                        $isSuspicious = $true
-                        $suspiciousPattern = $pattern
-                        break
-                    }
-                }
-                
-                if ($isSuspicious) {
-                    $suspiciousPsCommands += [PSCustomObject]@{
-                        Time = $commandTime
-                        Command = $command
-                        Pattern = $suspiciousPattern
-                    }
-                }
-            }
-        }
-        
-        if ($psCommandsFound -eq 0) {
-            Write-Host "  No PowerShell commands executed since Minecraft launch" -ForegroundColor Green
-        } else {
-            Write-Host ("  PowerShell commands executed since Minecraft launch: {0}" -f $psCommandsFound) -ForegroundColor Yellow
-            
-            if ($suspiciousPsCommands.Count -gt 0) {
-                Write-Host ""
-                Write-Host ("  SUSPICIOUS POWERSHELL COMMANDS DETECTED: {0}" -f $suspiciousPsCommands.Count) -ForegroundColor Red
-                Write-Host ""
-                foreach ($cmd in $suspiciousPsCommands) {
-                    Write-Host "    ! " -NoNewline -ForegroundColor Red
-                    Write-Host ("{0}" -f $cmd.Time.ToString("HH:mm:ss")) -NoNewline -ForegroundColor Yellow
-                    Write-Host " | " -NoNewline -ForegroundColor Gray
-                    Write-Host ("Pattern: {0}" -f $cmd.Pattern) -ForegroundColor Magenta
-                    Write-Host "      {0}" -f $cmd.Command -ForegroundColor White
-                    Write-Host ""
-                }
-                $verdictFlags.Add("Suspicious PowerShell commands executed since Minecraft launch ($($suspiciousPsCommands.Count))")
-            } else {
-                Write-Host "  No suspicious PowerShell commands detected" -ForegroundColor Green
-            }
-        }
-        
-    } catch {
-        Write-Host "  Error reading PowerShell history: $($_.Exception.Message)" -ForegroundColor Red
-    }
-} else {
-    Write-Host "  PowerShell history file not found" -ForegroundColor Yellow
-    Write-Host "  This could mean:" -ForegroundColor Gray
-    Write-Host "    - PowerShell history is disabled" -ForegroundColor Gray
-    Write-Host "    - PowerShell has never been used" -ForegroundColor Gray
-    Write-Host "    - History file was cleared" -ForegroundColor Gray
-}
-
-# -- CMD History Analysis --------------------------------------
-Write-Host ""
-Write-Host "CMD HISTORY ANALYSIS" -ForegroundColor Cyan
-Write-Host ""
-
-# CMD doesn't have a built-in history file, so we check other sources
-$cmdCommandsFound = 0
-$suspiciousCmdCommands = @()
-
-# Check recent event logs for CMD execution
-try {
-    $cmdEvents = Get-WinEvent -LogName "Microsoft-Windows-ProcessCreation/Operational" -MaxEvents 100 -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq 4688 }
-    
-    if ($cmdEvents) {
-        Write-Host "  Analyzing recent process creation events..." -ForegroundColor White
-        
-        foreach ($event in $cmdEvents) {
-            $eventTime = $event.TimeCreated
-            
-            if ($eventTime -ge $mcStartTime) {
-                $processData = $event.Message
-                $commandLine = ""
-                
-                # Extract command line from event data
-                if ($processData -match "Command Line:\s*(.+?)\s*Process") {
-                    $commandLine = $matches[1].Trim()
-                } elseif ($processData -match "Command Line:\s*(.+)") {
-                    $commandLine = $matches[1].Trim()
-                }
-                
-                if ($commandLine -and ($commandLine -like "*cmd.exe*" -or $commandLine -like "*command.com*")) {
-                    $cmdCommandsFound++
-                    
-                    # Check for suspicious patterns
-                    $isSuspicious = $false
-                    $suspiciousPattern = $null
-                    
-                    foreach ($pattern in $suspiciousCommands) {
-                        if ($commandLine -like "*$pattern*" -or $commandLine -match [regex]::Escape($pattern)) {
-                            $isSuspicious = $true
-                            $suspiciousPattern = $pattern
-                            break
-                        }
-                    }
-                    
-                    if ($isSuspicious) {
-                        $suspiciousCmdCommands += [PSCustomObject]@{
-                            Time = $eventTime
-                            Command = $commandLine
-                            Pattern = $suspiciousPattern
-                        }
-                    }
-                }
-            }
-        }
-        
-        if ($cmdCommandsFound -eq 0) {
-            Write-Host "  No CMD processes detected since Minecraft launch" -ForegroundColor Green
-        } else {
-            Write-Host ("  CMD processes executed since Minecraft launch: {0}" -f $cmdCommandsFound) -ForegroundColor Yellow
-            
-            if ($suspiciousCmdCommands.Count -gt 0) {
-                Write-Host ""
-                Write-Host ("  SUSPICIOUS CMD COMMANDS DETECTED: {0}" -f $suspiciousCmdCommands.Count) -ForegroundColor Red
-                Write-Host ""
-                foreach ($cmd in $suspiciousCmdCommands) {
-                    Write-Host "    ! " -NoNewline -ForegroundColor Red
-                    Write-Host ("{0}" -f $cmd.Time.ToString("HH:mm:ss")) -NoNewline -ForegroundColor Yellow
-                    Write-Host " | " -NoNewline -ForegroundColor Gray
-                    Write-Host ("Pattern: {0}" -f $cmd.Pattern) -ForegroundColor Magenta
-                    Write-Host "      {0}" -f $cmd.Command -ForegroundColor White
-                    Write-Host ""
-                }
-                $verdictFlags.Add("Suspicious CMD commands executed since Minecraft launch ($($suspiciousCmdCommands.Count))")
-            } else {
-                Write-Host "  No suspicious CMD commands detected" -ForegroundColor Green
-            }
-        }
-    } else {
-        Write-Host "  Process creation events not available" -ForegroundColor Yellow
-        Write-Host "  This requires audit policy to be enabled" -ForegroundColor Gray
-    }
-    
-} catch {
-    Write-Host "  Error analyzing process creation events: $($_.Exception.Message)" -ForegroundColor Red
-}
-
-# -- Additional Analysis ----------------------------------------
-Write-Host ""
-Write-Host "ADDITIONAL ANALYSIS" -ForegroundColor Cyan
-Write-Host ""
-
-# Check for recent script executions
-try {
-    $scriptEvents = Get-WinEvent -LogName "Microsoft-Windows-PowerShell/Operational" -MaxEvents 50 -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq 4103 -or $_.Id -eq 4104 }
-    
-    $scriptCount = 0
-    $suspiciousScripts = @()
-    
-    if ($scriptEvents) {
-        Write-Host "  Analyzing PowerShell script execution..." -ForegroundColor White
-        
-        foreach ($event in $scriptEvents) {
-            if ($event.TimeCreated -ge $mcStartTime) {
-                $scriptCount++
-                
-                $scriptContent = $event.Message
-                if ($scriptContent.Length -gt 200) {
-                    $scriptContent = $scriptContent.Substring(0, 200) + "..."
-                }
-                
-                # Check for suspicious script content
-                $isSuspicious = $false
-                foreach ($pattern in $suspiciousCommands) {
-                    if ($scriptContent -like "*$pattern*") {
-                        $isSuspicious = $true
-                        break
-                    }
-                }
-                
-                if ($isSuspicious) {
-                    $suspiciousScripts += [PSCustomObject]@{
-                        Time = $event.TimeCreated
-                        Content = $scriptContent
-                    }
-                }
-            }
-        }
-        
-        Write-Host ("  PowerShell scripts executed since Minecraft launch: {0}" -f $scriptCount) -ForegroundColor Yellow
-        
-        if ($suspiciousScripts.Count -gt 0) {
-            Write-Host ""
-            Write-Host ("  SUSPICIOUS SCRIPT EXECUTIONS DETECTED: {0}" -f $suspiciousScripts.Count) -ForegroundColor Red
-            Write-Host ""
-            foreach ($script in $suspiciousScripts) {
-                Write-Host "    ! " -NoNewline -ForegroundColor Red
-                Write-Host ("{0}" -f $script.Time.ToString("HH:mm:ss")) -ForegroundColor Yellow
-                Write-Host "      {0}" -f $script.Content -ForegroundColor White
-                Write-Host ""
-            }
-            $verdictFlags.Add("Suspicious PowerShell scripts executed since Minecraft launch ($($suspiciousScripts.Count))")
-        }
-    }
-    
-} catch {
-    Write-Host "  Error analyzing script execution: $($_.Exception.Message)" -ForegroundColor Red
-}
-
-# -- Summary --------------------------------------------------
-Write-Host ""
-Write-Host "COMMAND HISTORY SUMMARY" -ForegroundColor Magenta
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host "  Analysis period: " -ForegroundColor Gray -NoNewline
-Write-Host ("{0} to {1}" -f $mcStartTime.ToString("yyyy-MM-dd HH:mm:ss"), (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")) -ForegroundColor White
-Write-Host "  PowerShell commands: " -ForegroundColor Gray -NoNewline
-Write-Host $psCommandsFound -ForegroundColor White
-Write-Host "  CMD processes: " -ForegroundColor Gray -NoNewline
-Write-Host $cmdCommandsFound -ForegroundColor White
-Write-Host "  Suspicious PowerShell: " -ForegroundColor Gray -NoNewline
-if ($suspiciousPsCommands.Count -gt 0) {
-    Write-Host $suspiciousPsCommands.Count -ForegroundColor Red
-} else {
-    Write-Host $suspiciousPsCommands.Count -ForegroundColor Green
-}
-Write-Host "  Suspicious CMD: " -ForegroundColor Gray -NoNewline
-if ($suspiciousCmdCommands.Count -gt 0) {
-    Write-Host $suspiciousCmdCommands.Count -ForegroundColor Red
-} else {
-    Write-Host $suspiciousCmdCommands.Count -ForegroundColor Green
-}
-Write-Host ""
-
-# -- Final verdict update ---------------------------------------
-if ($suspiciousPsCommands.Count -gt 0 -or $suspiciousCmdCommands.Count -gt 0) {
-    $totalSuspicious = $suspiciousPsCommands.Count + $suspiciousCmdCommands.Count
-    Write-Host "  COMMAND HISTORY ANALYSIS: " -ForegroundColor Gray -NoNewline
-    Write-Host ("{0} suspicious commands detected" -f $totalSuspicious) -ForegroundColor Red
-} else {
-    Write-Host "  COMMAND HISTORY ANALYSIS: " -ForegroundColor Gray -NoNewline
-    Write-Host "Clean" -ForegroundColor Green
-}
-
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-Write-Host "Command History Analysis complete!" -ForegroundColor Cyan
-Write-Host ""
-
-# -- FINAL VERDICT ---------------------------------------------
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host "  FINAL VERDICT" -ForegroundColor Cyan
-Write-Host ("=" * 76) -ForegroundColor Gray
-
-if ($verdictFlags.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  * FLAGGED *" -ForegroundColor White -BackgroundColor DarkRed
-    Write-Host ""
-    Write-Host "  Hard flags:" -ForegroundColor Red
-    foreach ($f in $verdictFlags) {
-        Write-Host "    * $f" -ForegroundColor Red
-    }
-    if ($verdictWarnings.Count -gt 0) {
-        Write-Host ""
-        Write-Host "  Also worth reviewing:" -ForegroundColor Yellow
-        foreach ($w in $verdictWarnings) {
-            Write-Host "    * $w" -ForegroundColor Yellow
-        }
-    }
-    Write-Host ""
-    Write-Host "  Note: Some flags can false flag legitimate software - manual verification recommended" -ForegroundColor Gray
-    Write-Host "  for highly suspicious items before taking any action" -ForegroundColor Gray
-} elseif ($verdictWarnings.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  * REVIEW *" -ForegroundColor White -BackgroundColor DarkYellow
-    Write-Host ""
-    Write-Host "  Nothing confirmed but worth checking:" -ForegroundColor Yellow
-    foreach ($w in $verdictWarnings) {
-        Write-Host "    * $w" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host ""
-    Write-Host "  * CLEAN *" -ForegroundColor White -BackgroundColor DarkGreen
-    Write-Host ""
-    Write-Host "  No flags or warnings raised across all tools" -ForegroundColor Green
-}
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-Write-Host "  Complete analysis finished! " -ForegroundColor Magenta
-Write-Host ""
-Write-Host "  Created by: "  -ForegroundColor White    -NoNewline
-Write-Host "AcousticVoid"    -ForegroundColor Magenta
-Write-Host "  My Socials: "  -ForegroundColor White    -NoNewline
-Write-Host "Discord  : "     -ForegroundColor Magenta  -NoNewline
-Write-Host "piespeas"        -ForegroundColor Magenta
-Write-Host "                 " -NoNewline
-Write-Host "GitHub   : "     -ForegroundColor Gray -NoNewline
-Write-Host "https://piespeas.github.io/" -ForegroundColor White
-Write-Host "                 " -NoNewline
-Write-Host "YouTube  : "     -ForegroundColor Magenta -NoNewline
-Write-Host "AcousticVoid"    -ForegroundColor Magenta
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-Write-Host "All analysis complete. Results displayed above." -ForegroundColor Green
-
-Write-Host "Press any key to exit..." -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-Write-Host ""
-Write-Host "AcousticVoid owns all cheaters, the undeniable daddy of every last one of them, standing above the rest as the king who dominates the entire scene, the god-tier presence that overshadows anyone trying to compete — every cheater falls under AcousticVoid’s rule, outclassed, outplayed, and completely controlled, with no exceptions, no rivals, and no one even close to touching that level of supremacy."              -ForegroundColor Magenta
-
-
-# ============================================================
-#  TRANSITION TO PART 3
-# ============================================================
-Write-Host ""
-Write-Host ("=" * 76) -ForegroundColor Gray
-Write-Host ""
-Write-Host "  Press any key to continue to the JVM Checker..." -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-
-# ============================================================
-#  PART 3 - JVM CHECKER
-# ============================================================
-Write-Host "`nJVM CHECKER" -ForegroundColor Cyan
-
-Get-CimInstance Win32_Process | Where-Object { $_.Name -in @("javaw.exe", "java.exe") } | ForEach-Object {
-    $cmd = $_.CommandLine
-
-    if (-not $cmd) { return }
-
-    $argList = $cmd -split ' (?=-)'
-
-    $filteredArgs = $argList | Where-Object {
-        $_ -like "-Xmx*" -or 
-        $_ -like "-Xms*" -or 
-        $_ -like "-javaagent*" -or 
-        $_ -like "-Dfabric.addMods*" -or 
-        $_ -like "-Dloader.addMods*"
-    }
-
-    if ($filteredArgs) {
-        Write-Host "`n[Process ID: $($_.ProcessId)] --- Minecraft JVM / Mod Arguments ---" -ForegroundColor Cyan
-        $filteredArgs | ForEach-Object { Write-Host $_.Trim() }
-    } else {
-        Write-Host "No specific JVM/Mod arguments found for process: $($_.ProcessId)" -ForegroundColor Yellow
-    }
-}
