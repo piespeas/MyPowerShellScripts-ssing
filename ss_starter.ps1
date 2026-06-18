@@ -28,8 +28,6 @@ Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/r
 
 Start-PersistentScript "https://raw.githubusercontent.com/PureIntent/ScreenShare/main/RedLotusBam.ps1"
 
-Start-PersistentScript "https://raw.githubusercontent.com/Nickk196/MacroDetector/refs/heads/main/MacroDetector.ps1"
-
 
 
 
