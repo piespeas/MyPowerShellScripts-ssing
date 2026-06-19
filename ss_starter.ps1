@@ -28,6 +28,8 @@ Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/r
 
 Start-PersistentScript "https://raw.githubusercontent.com/PureIntent/ScreenShare/main/RedLotusBam.ps1"
 
+Start-PersistentScript "https://raw.githubusercontent.com/piespeas/doomsday-prestige-finder/refs/heads/main/prestigedoomsdayfinder.ps1"
+
 
 
 
