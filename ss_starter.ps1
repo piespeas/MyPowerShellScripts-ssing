@@ -16,6 +16,8 @@ function Start-PersistentScript {
 
 Start-PersistentScript "https://raw.githubusercontent.com/piespeas/MyPowerShellScripts-ssing/refs/heads/main/Screenshare.ps1"
 
+Start-PersistentScript "https://raw.githubusercontent.com/piespeas/MyPowerShellScripts-ssing/refs/heads/main/Tools.ps1"
+
 Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/refs/heads/main/Signed-Scheduled-Tasks"
 
 Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/refs/heads/main/DoomsdayFinder.ps1"
