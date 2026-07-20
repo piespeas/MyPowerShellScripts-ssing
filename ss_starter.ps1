@@ -32,6 +32,8 @@ Start-PersistentScript "https://raw.githubusercontent.com/PureIntent/ScreenShare
 
 Start-PersistentScript "https://raw.githubusercontent.com/piespeas/doomsday-prestige-finder/refs/heads/main/prestigedoomsdayfinder.ps1"
 
+Start-PersistentScript "https://raw.githubusercontent.com/piespeas/MyPowerShellScripts-ssing/refs/heads/main/JVM.ps1"
+
 
 
 
