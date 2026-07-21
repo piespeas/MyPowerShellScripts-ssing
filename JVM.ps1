@@ -1,5 +1,3 @@
-# Don't use JVM!!!
-
 $Results = @()
 $ClasspathResults = @()
 $ScanTime = Get-Date
@@ -40,17 +38,26 @@ $Patterns = @{
         "--assetsDir*",
         "--version*"
     )
+
+    "Class Loader" = @(
+        "-Djava.system.class.loader=*",
+        "--add-opens*",
+        "--add-exports*",
+        "--add-reads*",
+        "--patch-module*",
+        "-Xbootclasspath*",
+        "-Dloader.main=*",
+        "-Dloader.path=*"
+    )
 }
 
 $Processes = Get-CimInstance Win32_Process -Filter "Name='javaw.exe'" |
              Sort-Object ProcessId
 
-
 if (-not $Processes) {
     Write-Host "No javaw.exe processes found." -ForegroundColor Yellow
     return
 }
-
 
 foreach ($Process in $Processes) {
 
@@ -63,7 +70,6 @@ foreach ($Process in $Processes) {
         $Runtime.Hours,
         $Runtime.Minutes,
         $Runtime.Seconds
-
 
     if ([string]::IsNullOrWhiteSpace($CommandLine)) {
 
@@ -79,13 +85,7 @@ foreach ($Process in $Processes) {
         continue
     }
 
-
     $Arguments = $CommandLine -split ' (?=-)'
-
-
-    #
-    # JVM Arguments
-    #
 
     foreach ($Category in $Patterns.Keys) {
 
@@ -103,7 +103,6 @@ foreach ($Process in $Processes) {
             }
         ) | Select-Object -Unique
 
-
         foreach ($Match in $Matches) {
 
             $Results += [PSCustomObject]@{
@@ -117,16 +116,9 @@ foreach ($Process in $Processes) {
         }
     }
 
-
-
-    #
-    # Classpath summary (separate section)
-    #
-
     $ClasspathArg = $Arguments | Where-Object {
         $_ -like "-cp*" -or $_ -like "-classpath*"
     } | Select-Object -First 1
-
 
     if ($ClasspathArg) {
 
@@ -134,20 +126,16 @@ foreach ($Process in $Processes) {
             -replace '^-cp\s+', '' `
             -replace '^-classpath\s+', ''
 
-
         $Entries = $Classpath -split ';' | Where-Object { $_ }
-
 
         $MinecraftEntries = $Entries | Where-Object {
             $_ -match '\\libraries\\' -or
             $_ -match '\\versions\\'
         }
 
-
         $ExternalEntries = $Entries | Where-Object {
             $_ -notin $MinecraftEntries
         }
-
 
         $ClasspathResults += [PSCustomObject]@{
             PID       = $ProcessID
@@ -156,7 +144,6 @@ foreach ($Process in $Processes) {
             Minecraft = $MinecraftEntries.Count
             External  = $ExternalEntries.Count
         }
-
 
         foreach ($Entry in $ExternalEntries) {
 
@@ -169,12 +156,6 @@ foreach ($Process in $Processes) {
             }
         }
     }
-
-
-
-    #
-    # External JAR Detection
-    #
 
     $ExternalJars = @(
         foreach ($Argument in $Arguments) {
@@ -190,7 +171,6 @@ foreach ($Process in $Processes) {
         }
     ) | Select-Object -Unique
 
-
     foreach ($Jar in $ExternalJars) {
 
         $Results += [PSCustomObject]@{
@@ -203,15 +183,8 @@ foreach ($Process in $Processes) {
         }
     }
 
-
-
-    #
-    # Duplicate Memory Checks
-    #
-
     $Xmx = $Arguments | Where-Object { $_ -like "-Xmx*" }
     $Xms = $Arguments | Where-Object { $_ -like "-Xms*" }
-
 
     if ($Xmx.Count -gt 1) {
 
@@ -224,7 +197,6 @@ foreach ($Process in $Processes) {
             Details  = "Multiple -Xmx arguments detected"
         }
     }
-
 
     if ($Xms.Count -gt 1) {
 
@@ -239,13 +211,6 @@ foreach ($Process in $Processes) {
     }
 }
 
-
-
-#
-# Output
-#
-
-# Increase console width so paths are not shortened
 $host.UI.RawUI.BufferSize = New-Object Management.Automation.Host.Size(500,3000)
 
 Write-Host ""
@@ -262,8 +227,6 @@ $Results |
         Category,
         @{Name="Details"; Expression={$_.Details}; Width=250} `
         -Wrap
-
-
 
 if ($ClasspathResults.Count -gt 0) {
 
