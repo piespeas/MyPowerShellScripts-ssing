@@ -18,15 +18,7 @@ Start-PersistentScript "https://raw.githubusercontent.com/piespeas/MyPowerShellS
 
 Start-PersistentScript "https://raw.githubusercontent.com/piespeas/MyPowerShellScripts-ssing/refs/heads/main/Tools.ps1"
 
-Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/refs/heads/main/Signed-Scheduled-Tasks"
-
-Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/refs/heads/main/DoomsdayFinder.ps1"
-
 Start-PersistentScript "https://raw.githubusercontent.com/Enr1c0o/Powershell-Scripts/refs/heads/main/Alt-Detector.ps1"
-
-Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/refs/heads/main/ShellSearch.ps1"
-
-Start-PersistentScript "https://raw.githubusercontent.com/praiselily/lilith-ps/refs/heads/main/CommonDirectories.ps1"
 
 Start-PersistentScript "https://raw.githubusercontent.com/PureIntent/ScreenShare/main/RedLotusBam.ps1"
 
