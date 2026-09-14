@@ -62,6 +62,8 @@ $Groups = [ordered]@{
         'https://www.nirsoft.net/utils/uninstallview-x64.zip'
         'https://www.nirsoft.net/utils/usbdrivelog.zip'
         'https://www.nirsoft.net/utils/networkusageview-x64.zip'
+        'https://www.nirsoft.net/utils/ofview.zip'
+        'https://www.nirsoft.net/utils/iehv.zip'
     )
     'Eric Zimmerman' = @(
         'https://download.ericzimmermanstools.com/net9/PECmd.zip'
