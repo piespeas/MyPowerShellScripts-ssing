@@ -115,6 +115,8 @@ $Groups = [ordered]@{
     'Orbdiff' = @(
         'https://github.com/Orbdiff/BAMReveal/releases/download/v1.2.5/BAMReveal.exe'
         'https://github.com/Orbdiff/PrefetchView/releases/download/v1.6.6/pv++.exe'
+        'https://github.com/Orbdiff/AmcacheParser'
+        'https://github.com/Orbdiff/Fileless/releases/download/v1.3/fileless.exe'
         'https://github.com/Orbdiff/MFT-HardLink/releases/download/v1.2/HardLink.exe'
         'https://github.com/Orbdiff/SSTool/releases/download/lol/SSTool.exe'
     )
