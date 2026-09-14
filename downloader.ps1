@@ -38,6 +38,9 @@ $Groups = [ordered]@{
         'https://github.com/spokwn/BamDeletedKeys/releases/latest/download/BamDeletedKeys.exe'
         'https://github.com/spokwn/Tool/releases/latest/download/espouken.exe'
         'https://github.com/spokwn/KernelLiveDumpTool/releases/download/v1.1/KernelLiveDumpTool.exe'
+        'https://github.com/spokwn/ActivitiesCache-execution/releases/download/v0.6.5/ActivitiesCacheParser.exe'
+        'https://github.com/spokwn/process-parser/releases/download/v0.5.5/ProcessParser.exe'
+        'https://github.com/spokwn/AmcacheParser'
     )
     'Nirsoft' = @(
         'https://www.nirsoft.net/utils/winprefetchview-x64.zip'
@@ -118,6 +121,12 @@ $Groups = [ordered]@{
         'https://github.com/Orbdiff/AmcacheParser'
         'https://github.com/Orbdiff/Fileless/releases/download/v1.3/fileless.exe'
         'https://github.com/Orbdiff/MFT-HardLink/releases/download/v1.2/HardLink.exe'
+        'https://github.com/Orbdiff/StringsParser/releases/download/v1.2.1b/stringsparser.1.2.1b.exe'
+        'https://github.com/Orbdiff/WebHollowing/releases/download/v1.0/web.hollowing.exe'
+        'https://github.com/Orbdiff/MFTParser/releases/download/v0.1/mftparser.exe'
+        'https://github.com/Orbdiff/DPS-Analyzer/releases/download/v1.1/dpsanalyzer.exe'
+        'https://github.com/Orbdiff/PFTrace/releases/download/v1.0.1/PFTrace.exe'
+        
         'https://github.com/Orbdiff/SSTool/releases/download/lol/SSTool.exe'
     )
     'Detect' = @(
